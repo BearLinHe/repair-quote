@@ -1,0 +1,103 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+enum CaseStatus {
+  SUBMITTED
+  IN_PROGRESS
+  CANCELED
+  COMPLETED
+}
+
+model Case {
+  id                   String    @id @default(uuid())
+  created_at           DateTime  @default(now())
+  updated_at           DateTime  @updatedAt
+  clerk_user_id        String
+  plate                String?
+  vin                  String?
+  unit_number          Int?
+  customer_name        String?
+  customer_phone       String?
+  customer_email       String?
+  check_in_at          DateTime?
+  status               CaseStatus @default(SUBMITTED)
+  parts_subtotal_cents Int       @default(0)
+  labor_subtotal_cents Int       @default(0)
+  cleaning_fee_cents   Int       @default(0)
+  tax_cents            Int       @default(0)
+  grand_total_cents    Int       @default(0)
+  notes                String?
+
+  repair_items   CaseRepairItem[]
+  parts          CasePart[]
+  labor          CaseLabor[]
+  status_logs    CaseStatusLog[]
+}
+
+model CaseRepairItem {
+  id         String   @id @default(uuid())
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+  case_id    String
+  name       String
+  sort_order Int      @default(0)
+
+  case Case @relation(fields: [case_id], references: [id], onDelete: Cascade)
+}
+
+model CasePart {
+  id               String   @id @default(uuid())
+  created_at       DateTime @default(now())
+  updated_at       DateTime @updatedAt
+  case_id          String
+  name             String
+  unit_price_cents Int
+  qty              Int
+  line_total_cents Int
+
+  case Case @relation(fields: [case_id], references: [id], onDelete: Cascade)
+}
+
+model CaseLabor {
+  id               String   @id @default(uuid())
+  created_at       DateTime @default(now())
+  updated_at       DateTime @updatedAt
+  case_id          String
+  name             String
+  hours            Decimal  @db.Decimal(10, 2)
+  rate_cents       Int
+  line_total_cents Int
+
+  case Case @relation(fields: [case_id], references: [id], onDelete: Cascade)
+}
+
+model CaseStatusLog {
+  id          String     @id @default(uuid())
+  created_at  DateTime   @default(now())
+  updated_at  DateTime   @updatedAt
+  case_id     String
+  from_status CaseStatus?
+  to_status   CaseStatus
+  changed_by  String
+  changed_at  DateTime   @default(now())
+  note        String?
+
+  case Case @relation(fields: [case_id], references: [id], onDelete: Cascade)
+}
+
+model Setting {
+  id                    String   @id @default(uuid())
+  created_at            DateTime @default(now())
+  updated_at            DateTime @updatedAt
+  cleaning_rate_bps     Int      @default(1000)
+  cleaning_cap_cents    Int      @default(20000)
+  tax_rate_bps          Int      @default(1075)
+  company_name          String   @default("YaoYuan Inc.")
+}
