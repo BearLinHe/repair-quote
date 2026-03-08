@@ -7,8 +7,8 @@ async function getCaseAndCheck(id: string, userId: string) {
     where: { id },
     include: {
       repair_items: { orderBy: { sort_order: "asc" } },
-      parts: true,
-      labor: true,
+      parts: { orderBy: { created_at: "asc" } },
+      labor: { orderBy: { created_at: "asc" } },
       status_logs: { orderBy: { changed_at: "desc" } },
     },
   });

@@ -56,6 +56,21 @@ type History = {
   labor_templates: Array<{ name: string; last_rate_cents: number }>;
 };
 
+/** 状态历史时间：按本地时区、统一格式显示，避免显示错乱 */
+function formatStatusLogTime(isoString: string): string {
+  const d = new Date(isoString);
+  if (Number.isNaN(d.getTime())) return isoString;
+  return d.toLocaleString("zh-CN", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+  });
+}
+
 export function CaseDetail({ caseData }: { caseData: CaseData }) {
   const [caseState, setCaseState] = useState(caseData);
   const [history, setHistory] = useState<History | null>(null);
@@ -200,8 +215,27 @@ export function CaseDetail({ caseData }: { caseData: CaseData }) {
     setStatusNote("");
   };
 
-  const downloadPdf = () => {
-    window.open(`/api/cases/${caseId}/pdf`, "_blank");
+  const downloadPdf = async () => {
+    try {
+      const res = await fetch(`/api/cases/${caseId}/pdf`);
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        alert(err?.error ?? "生成 PDF 失败");
+        return;
+      }
+      const usedCustomFont = res.headers.get("X-PDF-Font-Used");
+      if (usedCustomFont === "false") {
+        alert(
+          "未使用指定字体（NotoSerifSC-Medium.ttf），PDF 中的中文可能显示为方框或问号。请确认 public/fonts/NotoSerifSC-Medium.ttf 存在且有效。"
+        );
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      window.open(url, "_blank");
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      alert("生成或下载 PDF 时出错");
+    }
   };
 
   const status = caseState.status;
@@ -210,52 +244,64 @@ export function CaseDetail({ caseData }: { caseData: CaseData }) {
   const canProgressToComplete = status === "IN_PROGRESS";
   const canProgressToCancel = status === "IN_PROGRESS";
   const isFinal = status === "CANCELED" || status === "COMPLETED";
+  /** 仅「进行中」时可编辑维修项目、配件、人工；已提交未开始做单时仅可查看 */
+  const canEditDetails = status === "IN_PROGRESS";
   const statusLabel = (s: CaseStatus) =>
     ({ SUBMITTED: "已提交", IN_PROGRESS: "进行中", CANCELED: "已取消", COMPLETED: "已完成" })[s] ?? s;
 
   return (
-    <div className="space-y-6">
-      <Card>
-        <CardHeader className="pb-2">
+    <div className="space-y-8 pb-8">
+      <Card className="shadow-sm">
+        <CardHeader className="pb-2 sm:p-6 sm:pb-2">
           <CardTitle className="text-lg">车辆与司机</CardTitle>
         </CardHeader>
-        <CardContent className="text-sm space-y-1">
-          <p>
-            车牌：{caseState.plate ?? "-"} | 车架号：{caseState.vin ?? "-"} | 车号：{" "}
-            {caseState.unit_number ?? "-"}
+        <CardContent className="text-sm space-y-2 sm:p-6 sm:pt-0">
+          <p className="flex flex-wrap gap-x-2 gap-y-0.5">
+            <span>车牌：{caseState.plate ?? "-"}</span>
+            <span className="text-muted-foreground hidden sm:inline">|</span>
+            <span>车架号：{caseState.vin ?? "-"}</span>
+            <span className="text-muted-foreground hidden sm:inline">|</span>
+            <span>车号：{caseState.unit_number ?? "-"}</span>
           </p>
-          <p>
-            司机：{caseState.customer_name ?? "-"} | {caseState.customer_phone ?? ""}
+          <p className="flex flex-wrap gap-x-2 gap-y-0.5">
+            <span>司机：{caseState.customer_name ?? "-"}</span>
+            {caseState.customer_phone && (
+              <>
+                <span className="text-muted-foreground hidden sm:inline">|</span>
+                <span>{caseState.customer_phone}</span>
+              </>
+            )}
           </p>
-          <p>
-            状态：<span className="font-medium">{statusLabel(caseState.status)}</span> | 总价：{" "}
-            {formatCents(caseState.grand_total_cents)}
+          <p className="flex flex-wrap gap-x-2 gap-y-0.5">
+            <span>状态：<span className="font-medium">{statusLabel(caseState.status)}</span></span>
+            <span className="text-muted-foreground hidden sm:inline">|</span>
+            <span>总价：{formatCents(caseState.grand_total_cents)}</span>
           </p>
         </CardContent>
       </Card>
 
       <div className="flex flex-wrap gap-2">
         {canSubmitToProgress && (
-          <Button onClick={() => changeStatus("IN_PROGRESS")} disabled={loading}>
+          <Button onClick={() => changeStatus("IN_PROGRESS")} disabled={loading} className="min-h-[44px] sm:min-h-[40px] flex-1 sm:flex-none">
             开始做单
           </Button>
         )}
         {canSubmitToCancel && (
-          <Button variant="destructive" onClick={() => changeStatus("CANCELED")} disabled={loading}>
+          <Button variant="destructive" onClick={() => changeStatus("CANCELED")} disabled={loading} className="min-h-[44px] sm:min-h-[40px] flex-1 sm:flex-none">
             取消工单
           </Button>
         )}
         {canProgressToComplete && (
-          <Button onClick={() => changeStatus("COMPLETED")} disabled={loading}>
+          <Button onClick={() => changeStatus("COMPLETED")} disabled={loading} className="min-h-[44px] sm:min-h-[40px] flex-1 sm:flex-none">
             完成
           </Button>
         )}
         {canProgressToCancel && (
-          <Button variant="destructive" onClick={() => changeStatus("CANCELED")} disabled={loading}>
+          <Button variant="destructive" onClick={() => changeStatus("CANCELED")} disabled={loading} className="min-h-[44px] sm:min-h-[40px] flex-1 sm:flex-none">
             取消工单
           </Button>
         )}
-        <Button variant="outline" onClick={downloadPdf}>
+        <Button variant="outline" onClick={downloadPdf} className="min-h-[44px] sm:min-h-[40px] flex-1 sm:flex-none">
           生成 PDF
         </Button>
       </div>
@@ -265,25 +311,26 @@ export function CaseDetail({ caseData }: { caseData: CaseData }) {
             placeholder="状态变更备注 (可选)"
             value={statusNote}
             onChange={(e) => setStatusNote(e.target.value)}
-            className="max-w-xs"
+            className="flex-1 min-h-[44px] sm:min-h-[40px] max-w-full sm:max-w-xs"
           />
         </div>
       )}
 
-      <Card>
-        <CardHeader className="pb-2">
+      <Card className="shadow-sm">
+        <CardHeader className="pb-2 sm:p-6 sm:pb-2">
           <CardTitle className="text-lg">状态历史</CardTitle>
         </CardHeader>
-        <CardContent>
+        <CardContent className="sm:p-6 sm:pt-0">
           <ul className="space-y-2 text-sm">
             {caseState.status_logs.map((log) => (
-              <li key={log.id} className="flex gap-2">
-                <span className="text-muted-foreground">
-                  {new Date(log.changed_at).toLocaleString("zh-CN")}
+              <li key={log.id} className="flex items-center gap-2 whitespace-nowrap overflow-x-auto">
+                <span className="text-muted-foreground shrink-0">
+                  {formatStatusLogTime(log.changed_at)}
                 </span>
-                <span>
-                  {log.from_status ? statusLabel(log.from_status) : "—"} → {statusLabel(log.to_status)}
-                  {log.note ? `（${log.note}）` : ""}
+                <span className="shrink-0">
+                  {log.note === "Case created"
+                    ? "已创建"
+                    : `${log.from_status ? statusLabel(log.from_status) : "—"} → ${statusLabel(log.to_status)}${log.note ? `（${log.note}）` : ""}`}
                 </span>
               </li>
             ))}
@@ -291,72 +338,81 @@ export function CaseDetail({ caseData }: { caseData: CaseData }) {
         </CardContent>
       </Card>
 
-      <Tabs defaultValue="items">
-        <TabsList>
-          <TabsTrigger value="items">维修项目</TabsTrigger>
-          <TabsTrigger value="parts">配件</TabsTrigger>
-          <TabsTrigger value="labor">人工</TabsTrigger>
-          <TabsTrigger value="summary">合计</TabsTrigger>
+      <Tabs defaultValue="items" className="w-full">
+        <TabsList className="w-full flex overflow-x-auto shrink-0 gap-1 p-1 min-h-[44px] sm:min-h-[40px]">
+          <TabsTrigger value="items" className="flex-1 min-w-0 shrink-0 text-sm">维修项目</TabsTrigger>
+          <TabsTrigger value="parts" className="flex-1 min-w-0 shrink-0 text-sm">配件</TabsTrigger>
+          <TabsTrigger value="labor" className="flex-1 min-w-0 shrink-0 text-sm">人工</TabsTrigger>
+          <TabsTrigger value="summary" className="flex-1 min-w-0 shrink-0 text-sm">合计</TabsTrigger>
         </TabsList>
-        <TabsContent value="items" className="space-y-4">
-          <div className="flex gap-2 flex-wrap items-end">
-            <Input
-              placeholder="项目名称"
-              value={newItemName}
-              onChange={(e) => setNewItemName(e.target.value)}
-              className="max-w-[200px]"
-            />
-            <Select
-              onValueChange={(v) => {
-                setNewItemName(v);
-              }}
-              value=""
-            >
-              <SelectTrigger className="w-[180px]">
-                <SelectValue placeholder="从历史选择" />
-              </SelectTrigger>
-              <SelectContent>
-                {history?.repair_item_names?.map((name) => (
-                  <SelectItem key={name} value={name}>
-                    {name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <Button onClick={() => addRepairItem(newItemName)} disabled={loading || !newItemName.trim()}>
-              新增
-            </Button>
-          </div>
+        <TabsContent value="items" className="space-y-4 mt-4">
+          {canEditDetails && (
+            <div className="flex flex-col sm:flex-row gap-3 sm:gap-2 sm:flex-wrap sm:items-end">
+              <Input
+                placeholder="项目名称"
+                value={newItemName}
+                onChange={(e) => setNewItemName(e.target.value)}
+                className="w-full sm:max-w-[200px] min-h-[44px] sm:min-h-[40px]"
+              />
+              <Select
+                onValueChange={(v) => {
+                  setNewItemName(v);
+                }}
+                value=""
+              >
+                <SelectTrigger className="w-full sm:w-[180px] min-h-[44px] sm:min-h-[40px]">
+                  <SelectValue placeholder="从历史选择" />
+                </SelectTrigger>
+                <SelectContent>
+                  {history?.repair_item_names?.map((name) => (
+                    <SelectItem key={name} value={name}>
+                      {name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <Button onClick={() => addRepairItem(newItemName)} disabled={loading || !newItemName.trim()} className="min-h-[44px] sm:min-h-[40px] w-full sm:w-auto">
+                新增
+              </Button>
+            </div>
+          )}
           <ul className="space-y-2">
             {caseState.repair_items.map((item) => (
-              <li key={item.id} className="flex gap-2 items-center">
-                <Input
-                  defaultValue={item.name}
-                  onBlur={(e) => {
-                    const v = e.target.value.trim();
-                    if (v !== item.name) updateRepairItem(item.id, v);
-                  }}
-                  className="max-w-xs"
-                />
-                <Button variant="destructive" size="sm" onClick={() => deleteRepairItem(item.id)}>
-                  删除
-                </Button>
+              <li key={item.id} className="flex gap-2 items-center flex-wrap">
+                {!canEditDetails ? (
+                  <span className="py-2">{item.name}</span>
+                ) : (
+                  <>
+                    <Input
+                      defaultValue={item.name}
+                      onBlur={(e) => {
+                        const v = e.target.value.trim();
+                        if (v !== item.name) updateRepairItem(item.id, v);
+                      }}
+                      className="flex-1 min-w-0 min-h-[44px] sm:min-h-[40px]"
+                    />
+                    <Button variant="destructive" size="sm" onClick={() => deleteRepairItem(item.id)} className="min-h-[44px] sm:min-h-[36px]">
+                      删除
+                    </Button>
+                  </>
+                )}
               </li>
             ))}
           </ul>
         </TabsContent>
-        <TabsContent value="parts" className="space-y-4">
-          <div className="flex flex-wrap gap-4 items-end">
-            <div className="grid gap-1">
+        <TabsContent value="parts" className="space-y-4 mt-4">
+          {canEditDetails && (
+          <div className="flex flex-col sm:flex-row flex-wrap gap-3 sm:gap-4 sm:items-end">
+            <div className="grid gap-1 w-full sm:w-auto">
               <label className="text-sm font-medium text-muted-foreground">配件名</label>
               <Input
                 placeholder="配件名称"
                 value={newPartName}
                 onChange={(e) => setNewPartName(e.target.value)}
-                className="w-[140px]"
+                className="w-full sm:w-[140px] min-h-[44px] sm:min-h-[40px]"
               />
             </div>
-            <div className="grid gap-1">
+            <div className="grid gap-1 w-full sm:w-auto">
               <label className="text-sm font-medium text-muted-foreground">单价（元）</label>
               <Input
                 type="number"
@@ -364,10 +420,10 @@ export function CaseDetail({ caseData }: { caseData: CaseData }) {
                 placeholder="0.00"
                 value={newPartPrice}
                 onChange={(e) => setNewPartPrice(e.target.value)}
-                className="w-[100px]"
+                className="w-full sm:w-[100px] min-h-[44px] sm:min-h-[40px]"
               />
             </div>
-            <div className="grid gap-1">
+            <div className="grid gap-1 w-full sm:w-auto">
               <label className="text-sm font-medium text-muted-foreground">数量（默认1个）</label>
               <Input
                 type="number"
@@ -375,10 +431,10 @@ export function CaseDetail({ caseData }: { caseData: CaseData }) {
                 placeholder="1"
                 value={newPartQty}
                 onChange={(e) => setNewPartQty(e.target.value)}
-                className="w-[80px]"
+                className="w-full sm:w-[80px] min-h-[44px] sm:min-h-[40px]"
               />
             </div>
-            <div className="grid gap-1">
+            <div className="grid gap-1 w-full sm:w-auto">
               <label className="text-sm font-medium text-muted-foreground">从历史选择</label>
               <Select
               onValueChange={(v) => {
@@ -391,7 +447,7 @@ export function CaseDetail({ caseData }: { caseData: CaseData }) {
               }}
               value=""
             >
-              <SelectTrigger className="w-[160px]">
+              <SelectTrigger className="w-full sm:w-[160px] min-h-[44px] sm:min-h-[40px]">
                 <SelectValue placeholder="从历史选择" />
               </SelectTrigger>
               <SelectContent>
@@ -412,19 +468,21 @@ export function CaseDetail({ caseData }: { caseData: CaseData }) {
                 )
               }
               disabled={loading || !newPartName.trim()}
+              className="min-h-[44px] sm:min-h-[40px] w-full sm:w-auto"
             >
               新增
             </Button>
           </div>
-          <div className="rounded-md border overflow-x-auto">
-            <table className="w-full text-sm">
+          )}
+          <div className="rounded-lg border border-border overflow-x-auto -mx-1 px-1 sm:mx-0 sm:px-0">
+            <table className="w-full text-sm min-w-[480px]">
               <thead>
                 <tr className="border-b bg-muted/50">
-                  <th className="p-2 text-left">名称</th>
-                  <th className="p-2 text-right">单价（元）</th>
-                  <th className="p-2 text-right">数量</th>
-                  <th className="p-2 text-right">小计</th>
-                  <th></th>
+                  <th className="p-3 text-left font-medium">名称</th>
+                  <th className="p-3 text-right font-medium">单价（元）</th>
+                  <th className="p-3 text-right font-medium">数量</th>
+                  <th className="p-3 text-right font-medium">小计</th>
+                  {canEditDetails && <th className="w-16"></th>}
                 </tr>
               </thead>
               <tbody>
@@ -432,6 +490,7 @@ export function CaseDetail({ caseData }: { caseData: CaseData }) {
                   <PartRow
                     key={p.id}
                     part={p}
+                    readOnly={!canEditDetails}
                     onSave={(name, unit_price_cents, qty) =>
                       updatePart(p.id, name, unit_price_cents, qty)
                     }
@@ -442,52 +501,65 @@ export function CaseDetail({ caseData }: { caseData: CaseData }) {
             </table>
           </div>
         </TabsContent>
-        <TabsContent value="labor" className="space-y-4">
-          <div className="flex flex-wrap gap-2 items-end">
-            <Input
-              placeholder="人工名称"
-              value={newLaborName}
-              onChange={(e) => setNewLaborName(e.target.value)}
-              className="w-[140px]"
-            />
-            <Input
-              type="number"
-              step={0.25}
-              placeholder="小时"
-              value={newLaborHours}
-              onChange={(e) => setNewLaborHours(e.target.value)}
-              className="w-[80px]"
-            />
-            <Input
-              type="number"
-              step={0.01}
-              placeholder="费率（元/时）"
-              value={newLaborRate}
-              onChange={(e) => setNewLaborRate(e.target.value)}
-              className="w-[100px]"
-            />
-            <Select
-              onValueChange={(v) => {
-                const t = history?.labor_templates?.find((x) => x.name === v);
-                if (t) {
-                  setNewLaborName(t.name);
-                  setNewLaborRate((t.last_rate_cents / 100).toFixed(2));
-                  setNewLaborHours("1");
-                }
-              }}
-              value=""
-            >
-              <SelectTrigger className="w-[160px]">
-                <SelectValue placeholder="从历史选择" />
-              </SelectTrigger>
-              <SelectContent>
-                {history?.labor_templates?.map((t) => (
-                  <SelectItem key={t.name} value={t.name}>
-                    {t.name}（{(t.last_rate_cents / 100).toFixed(2)} 元/时）
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+        <TabsContent value="labor" className="space-y-4 mt-4">
+          {canEditDetails && (
+          <div className="flex flex-col sm:flex-row flex-wrap gap-3 sm:gap-2 sm:items-end">
+            <div className="grid gap-1 w-full sm:w-auto">
+              <label className="text-sm font-medium text-muted-foreground">人工名称</label>
+              <Input
+                placeholder="人工名称"
+                value={newLaborName}
+                onChange={(e) => setNewLaborName(e.target.value)}
+                className="w-full sm:w-[140px] min-h-[44px] sm:min-h-[40px]"
+              />
+            </div>
+            <div className="grid gap-1 w-full sm:w-auto">
+              <label className="text-sm font-medium text-muted-foreground">费率（元/时）</label>
+              <Input
+                type="number"
+                step={0.01}
+                placeholder="费率（元/时）"
+                value={newLaborRate}
+                onChange={(e) => setNewLaborRate(e.target.value)}
+                className="w-full sm:w-[100px] min-h-[44px] sm:min-h-[40px]"
+              />
+            </div>
+            <div className="grid gap-1 w-full sm:w-auto">
+              <label className="text-sm font-medium text-muted-foreground">小时</label>
+              <Input
+                type="number"
+                step={0.25}
+                placeholder="小时"
+                value={newLaborHours}
+                onChange={(e) => setNewLaborHours(e.target.value)}
+                className="w-full sm:w-[80px] min-h-[44px] sm:min-h-[40px]"
+              />
+            </div>
+            <div className="grid gap-1 w-full sm:w-auto">
+              <label className="text-sm font-medium text-muted-foreground">从历史选择</label>
+              <Select
+                onValueChange={(v) => {
+                  const t = history?.labor_templates?.find((x) => x.name === v);
+                  if (t) {
+                    setNewLaborName(t.name);
+                    setNewLaborRate((t.last_rate_cents / 100).toFixed(2));
+                    setNewLaborHours("1");
+                  }
+                }}
+                value=""
+              >
+                <SelectTrigger className="w-full sm:w-[160px] min-h-[44px] sm:min-h-[40px]">
+                  <SelectValue placeholder="从历史选择" />
+                </SelectTrigger>
+                <SelectContent>
+                  {history?.labor_templates?.map((t) => (
+                    <SelectItem key={t.name} value={t.name}>
+                      {t.name}（{(t.last_rate_cents / 100).toFixed(2)} 元/时）
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
             <Button
               onClick={() =>
                 addLabor(
@@ -497,19 +569,21 @@ export function CaseDetail({ caseData }: { caseData: CaseData }) {
                 )
               }
               disabled={loading || !newLaborName.trim()}
+              className="min-h-[44px] sm:min-h-[40px] w-full sm:w-auto"
             >
               新增
             </Button>
           </div>
-          <div className="rounded-md border overflow-x-auto">
-            <table className="w-full text-sm">
+          )}
+          <div className="rounded-lg border border-border overflow-x-auto -mx-1 px-1 sm:mx-0 sm:px-0">
+            <table className="w-full text-sm min-w-[480px]">
               <thead>
                 <tr className="border-b bg-muted/50">
-                  <th className="p-2 text-left">名称</th>
-                  <th className="p-2 text-right">小时</th>
-                  <th className="p-2 text-right">费率（元/时）</th>
-                  <th className="p-2 text-right">小计</th>
-                  <th></th>
+                  <th className="p-3 text-left font-medium">名称</th>
+                  <th className="p-3 text-right font-medium">费率（元/时）</th>
+                  <th className="p-3 text-right font-medium">小时</th>
+                  <th className="p-3 text-right font-medium">小计</th>
+                  {canEditDetails && <th className="w-16"></th>}
                 </tr>
               </thead>
               <tbody>
@@ -517,6 +591,7 @@ export function CaseDetail({ caseData }: { caseData: CaseData }) {
                   <LaborRow
                     key={l.id}
                     labor={l}
+                    readOnly={!canEditDetails}
                     onSave={(name, hours, rate_cents) =>
                       updateLabor(l.id, name, hours, rate_cents)
                     }
@@ -527,9 +602,9 @@ export function CaseDetail({ caseData }: { caseData: CaseData }) {
             </table>
           </div>
         </TabsContent>
-        <TabsContent value="summary">
-          <Card>
-            <CardContent className="pt-6 space-y-2">
+        <TabsContent value="summary" className="mt-4">
+          <Card className="shadow-sm">
+            <CardContent className="p-4 sm:pt-6 sm:p-6 space-y-2">
               <p>配件小计：{formatCents(caseState.parts_subtotal_cents)}</p>
               <p>人工小计：{formatCents(caseState.labor_subtotal_cents)}</p>
               <p>清洁费：{formatCents(caseState.cleaning_fee_cents)}</p>
@@ -545,10 +620,12 @@ export function CaseDetail({ caseData }: { caseData: CaseData }) {
 
 function PartRow({
   part,
+  readOnly,
   onSave,
   onDelete,
 }: {
   part: { id: string; name: string; unit_price_cents: number; qty: number; line_total_cents: number };
+  readOnly?: boolean;
   onSave: (name: string, unit_price_cents: number, qty: number) => void;
   onDelete: () => void;
 }) {
@@ -565,39 +642,49 @@ function PartRow({
     const q = Math.max(1, parseInt(qty, 10) || 1);
     onSave(name.trim() || part.name, up, q);
   };
+  if (readOnly) {
+    return (
+      <tr className="border-b">
+        <td className="p-2 sm:p-3">{part.name}</td>
+        <td className="p-2 sm:p-3 text-right">{(part.unit_price_cents / 100).toFixed(2)}</td>
+        <td className="p-2 sm:p-3 text-right">{part.qty}</td>
+        <td className="p-2 sm:p-3 text-right">{formatCents(part.line_total_cents)}</td>
+      </tr>
+    );
+  }
   return (
-    <tr className="border-b">
-      <td className="p-2">
+    <tr className="border-b hover:bg-muted/20">
+      <td className="p-2 sm:p-3">
         <Input
           value={name}
           onChange={(e) => setName(e.target.value)}
           onBlur={handleBlur}
-          className="h-8 w-full max-w-[160px]"
+          className="min-h-[40px] sm:min-h-[32px] w-full max-w-[160px]"
         />
       </td>
-      <td className="p-2">
+      <td className="p-2 sm:p-3">
         <Input
           type="number"
           step={0.01}
           value={price}
           onChange={(e) => setPrice(e.target.value)}
           onBlur={handleBlur}
-          className="h-8 w-24 text-right"
+          className="min-h-[40px] sm:min-h-[32px] w-20 sm:w-24 text-right"
         />
       </td>
-      <td className="p-2">
+      <td className="p-2 sm:p-3">
         <Input
           type="number"
           min={1}
           value={qty}
           onChange={(e) => setQty(e.target.value)}
           onBlur={handleBlur}
-          className="h-8 w-20 text-right"
+          className="min-h-[40px] sm:min-h-[32px] w-16 sm:w-20 text-right"
         />
       </td>
-      <td className="p-2 text-right">{formatCents(part.line_total_cents)}</td>
-      <td className="p-2">
-        <Button variant="destructive" size="sm" onClick={onDelete}>
+      <td className="p-2 sm:p-3 text-right align-middle">{formatCents(part.line_total_cents)}</td>
+      <td className="p-2 sm:p-3">
+        <Button variant="destructive" size="sm" onClick={onDelete} className="min-h-[40px] sm:min-h-[32px]">
           删除
         </Button>
       </td>
@@ -607,10 +694,12 @@ function PartRow({
 
 function LaborRow({
   labor,
+  readOnly,
   onSave,
   onDelete,
 }: {
   labor: LaborRow;
+  readOnly?: boolean;
   onSave: (name: string, hours: number, rate_cents: number) => void;
   onDelete: () => void;
 }) {
@@ -627,39 +716,49 @@ function LaborRow({
     const r = Math.max(0, Math.round((Number(rate) || 0) * 100));
     onSave(name.trim() || labor.name, h, r);
   };
+  if (readOnly) {
+    return (
+      <tr className="border-b">
+        <td className="p-2 sm:p-3">{labor.name}</td>
+        <td className="p-2 sm:p-3 text-right">{(labor.rate_cents / 100).toFixed(2)}</td>
+        <td className="p-2 sm:p-3 text-right">{labor.hours}</td>
+        <td className="p-2 sm:p-3 text-right">{formatCents(labor.line_total_cents)}</td>
+      </tr>
+    );
+  }
   return (
-    <tr className="border-b">
-      <td className="p-2">
+    <tr className="border-b hover:bg-muted/20">
+      <td className="p-2 sm:p-3">
         <Input
           value={name}
           onChange={(e) => setName(e.target.value)}
           onBlur={handleBlur}
-          className="h-8 w-full max-w-[160px]"
+          className="min-h-[40px] sm:min-h-[32px] w-full max-w-[160px]"
         />
       </td>
-      <td className="p-2">
-        <Input
-          type="number"
-          step={0.25}
-          value={hours}
-          onChange={(e) => setHours(e.target.value)}
-          onBlur={handleBlur}
-          className="h-8 w-20 text-right"
-        />
-      </td>
-      <td className="p-2">
+      <td className="p-2 sm:p-3">
         <Input
           type="number"
           step={0.01}
           value={rate}
           onChange={(e) => setRate(e.target.value)}
           onBlur={handleBlur}
-          className="h-8 w-24 text-right"
+          className="min-h-[40px] sm:min-h-[32px] w-20 sm:w-24 text-right"
         />
       </td>
-      <td className="p-2 text-right">{formatCents(labor.line_total_cents)}</td>
-      <td className="p-2">
-        <Button variant="destructive" size="sm" onClick={onDelete}>
+      <td className="p-2 sm:p-3">
+        <Input
+          type="number"
+          step={0.25}
+          value={hours}
+          onChange={(e) => setHours(e.target.value)}
+          onBlur={handleBlur}
+          className="min-h-[40px] sm:min-h-[32px] w-16 sm:w-20 text-right"
+        />
+      </td>
+      <td className="p-2 sm:p-3 text-right align-middle">{formatCents(labor.line_total_cents)}</td>
+      <td className="p-2 sm:p-3">
+        <Button variant="destructive" size="sm" onClick={onDelete} className="min-h-[40px] sm:min-h-[32px]">
           删除
         </Button>
       </td>

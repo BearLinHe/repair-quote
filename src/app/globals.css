@@ -3,25 +3,26 @@
 @tailwind utilities;
 
 :root {
-  --background: #fafafa;
-  --foreground: #171717;
+  --background: #f8fafc;
+  --foreground: #0f172a;
   --card: #ffffff;
-  --card-foreground: #171717;
+  --card-foreground: #0f172a;
   --popover: #ffffff;
-  --popover-foreground: #171717;
-  --primary: #0f766e;
+  --popover-foreground: #0f172a;
+  --primary: #0d9488;
   --primary-foreground: #f0fdfa;
   --secondary: #f1f5f9;
   --secondary-foreground: #0f172a;
   --muted: #f1f5f9;
   --muted-foreground: #64748b;
-  --accent: #f1f5f9;
+  --accent: #ccfbf1;
   --accent-foreground: #0f172a;
   --destructive: #dc2626;
   --destructive-foreground: #fafafa;
   --border: #e2e8f0;
   --input: #e2e8f0;
-  --ring: #0f766e;
+  --ring: #0d9488;
+  --radius: 0.5rem;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -48,11 +49,24 @@
   }
 }
 
-body {
-  color: var(--foreground);
-  background: var(--background);
-}
-
-* {
-  border-color: var(--border);
+@layer base {
+  html {
+    -webkit-tap-highlight-color: transparent;
+  }
+  body {
+    color: var(--foreground);
+    background: var(--background);
+    padding-left: env(safe-area-inset-left);
+    padding-right: env(safe-area-inset-right);
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+  * {
+    border-color: var(--border);
+  }
+  /* 移动端输入框至少 44px 高，避免 iOS 缩放 */
+  @media (max-width: 640px) {
+    input, select, textarea, button {
+      font-size: 16px !important;
+    }
+  }
 }

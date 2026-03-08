@@ -1,87 +1,10 @@
-import { PDFDocument, StandardFonts, rgb } from "pdf-lib";
+import { PDFDocument, StandardFonts, rgb, type PDFFont } from "pdf-lib";
+// @ts-expect-error fontkit 无类型或 default 导出
+import fontkit from "@pdf-lib/fontkit";
 
-/** 常用维修/配件中英对照，PDF 中显示英文；按长度降序避免短词先匹配 */
-const ZH_TO_EN: Record<string, string> = {
-  "更换机油": "Replace engine oil",
-  "更换机油滤清器": "Replace oil filter",
-  "更换空气滤清器": "Replace air filter",
-  "更换空调滤清器": "Replace cabin filter",
-  "更换刹车片": "Replace brake pads",
-  "更换刹车盘": "Replace brake discs",
-  "更换刹车油": "Replace brake fluid",
-  "更换火花塞": "Replace spark plugs",
-  "更换轮胎": "Replace tires",
-  "四轮定位": "Wheel alignment",
-  "动平衡": "Wheel balance",
-  "更换雨刮": "Replace wipers",
-  "更换雨刮片": "Replace wiper blades",
-  "更换蓄电池": "Replace battery",
-  "更换电瓶": "Replace battery",
-  "更换正时皮带": "Replace timing belt",
-  "更换防冻液": "Replace coolant",
-  "更换变速箱油": "Replace transmission fluid",
-  "清洗节气门": "Clean throttle body",
-  "清洗喷油嘴": "Clean fuel injectors",
-  "发动机保养": "Engine maintenance",
-  "常规保养": "Regular maintenance",
-  "小保养": "Minor service",
-  "大保养": "Major service",
-  "刹车片": "Brake pads",
-  "刹车盘": "Brake discs",
-  "刹车油": "Brake fluid",
-  "机油": "Engine oil",
-  "机油滤清器": "Oil filter",
-  "空气滤清器": "Air filter",
-  "空调滤清器": "Cabin filter",
-  "火花塞": "Spark plugs",
-  "轮胎": "Tires",
-  "雨刮": "Wipers",
-  "雨刮片": "Wiper blades",
-  "蓄电池": "Battery",
-  "电瓶": "Battery",
-  "正时皮带": "Timing belt",
-  "防冻液": "Coolant",
-  "变速箱油": "Transmission fluid",
-  "节气门": "Throttle body",
-  "喷油嘴": "Fuel injectors",
-  "发动机": "Engine",
-  "变速箱": "Transmission",
-  "底盘": "Chassis",
-  "钣金": "Body repair",
-  "喷漆": "Paint",
-  "补漆": "Touch-up paint",
-  "玻璃": "Glass",
-  "前挡": "Windshield",
-  "后挡": "Rear window",
-  "车门": "Door",
-  "保险杠": "Bumper",
-  "大灯": "Headlight",
-  "尾灯": "Taillight",
-  "雾灯": "Fog light",
-  "灯泡": "Bulb",
-  "保险": "Insurance",
-  "维修": "Repair",
-  "保养": "Maintenance",
-  "检测": "Inspection",
-  "更换": "Replace",
-  "清洗": "Clean",
-  "补胎": "Tire repair",
-};
-
-/** 将中文转为英文（词汇表匹配），其余非 ASCII 转为 ?，保证 Helvetica 可渲染 */
-function toPdfEnglish(str: string): string {
-  if (!str || /^[\x20-\x7E]*$/.test(str)) return str;
-  let out = str;
-  const sorted = Object.entries(ZH_TO_EN).sort((a, b) => b[0].length - a[0].length);
-  for (const [zh, en] of sorted) {
-    out = out.split(zh).join(en);
-  }
-  return out.replace(/[^\x20-\x7E]/g, "?");
-}
-
-/** Helvetica 仅支持 WinAnsi，中文等非 ASCII 转为 ? 避免报错，保证生成速度快 */
+/** 无中文字体时：Helvetica 仅支持 ASCII，非 ASCII 显示为 ?，不翻译 */
 function toPdfSafe(str: string): string {
-  return str.replace(/[^\x20-\x7E]/g, "?");
+  return (str ?? "").replace(/[^\x20-\x7E]/g, "?");
 }
 
 function formatCents(c: number) {
@@ -114,12 +37,35 @@ export type CasePdfInput = {
   cleaning_fee_cents: number;
   tax_cents: number;
   grand_total_cents: number;
+  /** 可选：中文字体文件字节（如 Noto Sans SC），传入后 PDF 内中文正常显示 */
+  customFontBytes?: Uint8Array;
 };
 
-export async function generateCasePdf(input: CasePdfInput): Promise<Uint8Array> {
+export type GenerateCasePdfResult = { pdfBytes: Uint8Array; usedCustomFont: boolean };
+
+export async function generateCasePdf(input: CasePdfInput): Promise<GenerateCasePdfResult> {
   const doc = await PDFDocument.create();
-  const font = await doc.embedFont(StandardFonts.Helvetica);
-  const fontBold = await doc.embedFont(StandardFonts.HelveticaBold);
+  let font: PDFFont;
+  let fontBold: PDFFont;
+  /** 有中文字体时直接显示原文，否则用英文/词汇表并替换非 ASCII 为 ? */
+  let useCustomFont = false;
+  if (input.customFontBytes && input.customFontBytes.length > 0) {
+    try {
+      doc.registerFontkit(fontkit);
+      font = await doc.embedFont(input.customFontBytes);
+      fontBold = font;
+      useCustomFont = true;
+    } catch (e) {
+      console.warn("PDF 中文字体嵌入失败，将使用 Helvetica:", e instanceof Error ? e.message : e);
+      font = await doc.embedFont(StandardFonts.Helvetica);
+      fontBold = await doc.embedFont(StandardFonts.HelveticaBold);
+    }
+  } else {
+    font = await doc.embedFont(StandardFonts.Helvetica);
+    fontBold = await doc.embedFont(StandardFonts.HelveticaBold);
+  }
+  const textForPdf = useCustomFont ? (str: string) => (str ?? "") : (str: string) => toPdfSafe(str ?? "");
+
   const page = doc.addPage([612, 792]);
   const { height } = page.getSize();
   let y = height - 50;
@@ -134,14 +80,14 @@ export async function generateCasePdf(input: CasePdfInput): Promise<Uint8Array> 
     y -= lineHeight;
   };
 
-  draw(toPdfEnglish(input.companyName), { bold: true, size: 18 });
+  draw(textForPdf(input.companyName), { bold: true, size: 18 });
   y -= 4;
   draw(`Date: ${input.date.toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" })}`);
   y -= 8;
 
   const vehicle: string[] = [];
-  if (input.plate) vehicle.push(`Plate: ${toPdfEnglish(input.plate)}`);
-  if (input.vin) vehicle.push(`VIN: ${toPdfEnglish(input.vin)}`);
+  if (input.plate) vehicle.push(`Plate: ${textForPdf(input.plate)}`);
+  if (input.vin) vehicle.push(`VIN: ${textForPdf(input.vin)}`);
   if (input.unit_number != null) vehicle.push(`Unit #: ${input.unit_number}`);
   if (vehicle.length) {
     draw("Vehicle: " + vehicle.join(" | "));
@@ -149,18 +95,18 @@ export async function generateCasePdf(input: CasePdfInput): Promise<Uint8Array> 
   }
   if (input.driver_name ?? input.driver_phone) {
     const driverParts: string[] = [];
-    if (input.driver_name) driverParts.push(`Driver: ${toPdfEnglish(input.driver_name)}`);
-    if (input.driver_phone) driverParts.push(`Phone: ${toPdfEnglish(input.driver_phone)}`);
+    if (input.driver_name) driverParts.push(`Driver: ${textForPdf(input.driver_name)}`);
+    if (input.driver_phone) driverParts.push(`Phone: ${textForPdf(input.driver_phone)}`);
     draw(driverParts.join(" | "));
     y -= 4;
   }
-  draw(`Status: ${toPdfEnglish(input.status)} | Grand Total: ${formatCents(input.grand_total_cents)}`);
+  draw(`Status: ${textForPdf(input.status)} | Grand Total: ${formatCents(input.grand_total_cents)}`);
   y -= 4;
 
   if (input.repairItems.length) {
     draw("Repair Items:", { bold: true });
     input.repairItems.forEach((name) => {
-      page.drawText("• " + toPdfEnglish(name), { x: left + 8, y, size: 10, font, color: rgb(0, 0, 0) });
+      page.drawText("• " + textForPdf(name), { x: left + 8, y, size: 10, font, color: rgb(0, 0, 0) });
       y -= smallLine;
     });
     y -= 4;
@@ -174,7 +120,7 @@ export async function generateCasePdf(input: CasePdfInput): Promise<Uint8Array> 
     page.drawText("Line Total", { x: left + 360, y, size: 10, font: fontBold, color: rgb(0, 0, 0) });
     y -= smallLine;
     input.parts.forEach((p) => {
-      page.drawText(toPdfEnglish(p.name).slice(0, 28), { x: left, y, size: 10, font, color: rgb(0, 0, 0) });
+      page.drawText(textForPdf(p.name).slice(0, 28), { x: left, y, size: 10, font, color: rgb(0, 0, 0) });
       page.drawText(String(p.qty), { x: left + 200, y, size: 10, font, color: rgb(0, 0, 0) });
       page.drawText(formatCents(p.unit_price_cents), { x: left + 260, y, size: 10, font, color: rgb(0, 0, 0) });
       page.drawText(formatCents(p.line_total_cents), { x: left + 360, y, size: 10, font, color: rgb(0, 0, 0) });
@@ -191,7 +137,7 @@ export async function generateCasePdf(input: CasePdfInput): Promise<Uint8Array> 
     page.drawText("Line Total", { x: left + 360, y, size: 10, font: fontBold, color: rgb(0, 0, 0) });
     y -= smallLine;
     input.labor.forEach((l) => {
-      page.drawText(toPdfEnglish(l.name).slice(0, 28), { x: left, y, size: 10, font, color: rgb(0, 0, 0) });
+      page.drawText(textForPdf(l.name).slice(0, 28), { x: left, y, size: 10, font, color: rgb(0, 0, 0) });
       page.drawText(String(l.hours), { x: left + 200, y, size: 10, font, color: rgb(0, 0, 0) });
       page.drawText(formatCents(l.rate_cents), { x: left + 280, y, size: 10, font, color: rgb(0, 0, 0) });
       page.drawText(formatCents(l.line_total_cents), { x: left + 360, y, size: 10, font, color: rgb(0, 0, 0) });
@@ -209,5 +155,6 @@ export async function generateCasePdf(input: CasePdfInput): Promise<Uint8Array> 
   draw("Customer Signature: _________________________________________");
   draw("Date: _________________________________________");
 
-  return doc.save();
+  const pdfBytes = await doc.save();
+  return { pdfBytes, usedCustomFont: useCustomFont };
 }

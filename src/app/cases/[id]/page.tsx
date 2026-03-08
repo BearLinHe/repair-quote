@@ -12,8 +12,8 @@ export default async function CaseDetailPage({ params }: { params: Promise<{ id:
     where: { id },
     include: {
       repair_items: { orderBy: { sort_order: "asc" } },
-      parts: true,
-      labor: true,
+      parts: { orderBy: { created_at: "asc" } },
+      labor: { orderBy: { created_at: "asc" } },
       status_logs: { orderBy: { changed_at: "desc" } },
     },
   });
@@ -26,9 +26,9 @@ export default async function CaseDetailPage({ params }: { params: Promise<{ id:
     changed_at: l.changed_at.toISOString(),
   }));
   return (
-    <div className="container mx-auto py-8 px-4">
-      <div className="mb-4">
-        <Link href="/dashboard" className="text-primary hover:underline">
+    <div className="container mx-auto py-8 px-4 pb-14 sm:py-10 sm:px-6 sm:pb-16">
+      <div className="mb-6">
+        <Link href="/dashboard" className="text-primary hover:underline inline-flex items-center min-h-[44px]">
           ← 返回列表
         </Link>
       </div>
