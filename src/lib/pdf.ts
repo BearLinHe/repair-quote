@@ -1,5 +1,4 @@
 import { PDFDocument, StandardFonts, rgb, type PDFFont } from "pdf-lib";
-// @ts-expect-error fontkit 无类型或 default 导出
 import fontkit from "@pdf-lib/fontkit";
 
 /** 无中文字体时：Helvetica 仅支持 ASCII，非 ASCII 显示为 ?，不翻译 */
