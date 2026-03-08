@@ -85,11 +85,33 @@ npm run dev
 
 浏览器打开 `http://localhost:3000`，会重定向到 `/dashboard`；未登录会进入 Clerk 登录页。登录后可在 Dashboard 新建 Case，在详情页维护项目/配件/人工、改状态、生成 PDF。
 
-## 部署
+## 部署到 Vercel
 
-- 在 Vercel 等平台配置 `DATABASE_URL`、`DIRECT_URL`、Clerk 密钥。
-- 部署前执行 `npx prisma migrate deploy`（或平台 build 前执行）。
-- 部署后可选执行一次 seed：`npx tsx prisma/seed.ts`（若库中尚无 settings）。
+1. **在 Vercel 创建项目**
+   - 打开 [vercel.com](https://vercel.com) 并登录，点击 **Add New → Project**。
+   - 选择 **Import Git Repository**，连接 GitHub 后选择 `BearLinHe/repair-quote`（或你的 fork）。
+   - Framework Preset 选 **Next.js**，保持默认 Build Command / Output 即可。
+
+2. **配置环境变量**
+   - 在 Project → **Settings → Environment Variables** 中添加（Production / Preview 按需勾选）：
+   - `DATABASE_URL`：Neon 的 **pooler** 连接串（带 `?sslmode=require`，建议加 `&pgbouncer=true`）。
+   - `DIRECT_URL`：Neon 的 **直连** 连接串（用于迁移；若与 DATABASE_URL 相同也可填同一值）。
+   - `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`：Clerk 应用的 Publishable Key。
+   - `CLERK_SECRET_KEY`：Clerk 应用的 Secret Key。
+   - 在 [Clerk Dashboard](https://dashboard.clerk.com) 中为该 Vercel 域名添加 **Allowed redirect URLs**（如 `https://你的项目.vercel.app`）。
+
+3. **数据库迁移（首次部署前执行一次）**
+   - 本地使用**生产库**连接串执行：  
+     `DATABASE_URL="你的生产 pooler" DIRECT_URL="你的生产直连" npx prisma migrate deploy`  
+   - 或在新项目里先不设 env，部署一次后再设 env 并 Redeploy；迁移需在能访问生产 DB 的环境跑一次。
+
+4. **部署**
+   - 点击 **Deploy**；构建时会自动执行 `postinstall`（含 `prisma generate`）。
+   - 若生产库尚无 settings 数据，部署成功后可在本地用生产 `DATABASE_URL` 执行一次：  
+     `npx tsx prisma/seed.ts`。
+
+5. **（可选）`vercel.json`**
+   - 项目根目录已包含 `vercel.json`，用于框架识别，一般无需修改。
 
 ## API 一览
 
