@@ -231,8 +231,14 @@ export function CaseDetail({ caseData }: { caseData: CaseData }) {
       }
       const blob = await res.blob();
       const url = URL.createObjectURL(blob);
-      window.open(url, "_blank");
-      URL.revokeObjectURL(url);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `quote-${caseId.slice(0, 8)}.pdf`;
+      a.style.display = "none";
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      setTimeout(() => URL.revokeObjectURL(url), 60000);
     } catch (e) {
       alert("生成或下载 PDF 时出错");
     }
