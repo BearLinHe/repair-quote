@@ -86,19 +86,21 @@ export async function generateCasePdf(input: CasePdfInput): Promise<GenerateCase
     y -= lineHeight;
   };
 
-  // 标题区：公司名（左上）+ Invoice（右上）
+  // 标题区：公司名（左上）+ Invoice（右上，与公司名同一基线）；其下为地址与电话
   draw(textForPdf(input.companyName), { bold: true, size: 20 });
   const invoiceTitle = "Invoice";
   const invoiceSize = 16;
   const invoiceWidth = fontBold.widthOfTextAtSize(invoiceTitle, invoiceSize);
+  const companyBaselineY = y + lineHeight;
   page.drawText(invoiceTitle, {
     x: width - invoiceWidth - 50,
-    y,
+    y: companyBaselineY,
     size: invoiceSize,
     font: fontBold,
     color: rgb(0, 0, 0),
   });
-  y -= lineHeight;
+  draw("25503 Industrial Blvd, Hayward, CA 94545", { size: 11 });
+  draw("Tel: 4159679959", { size: 11 });
   y -= 8;
   const d = input.date;
   const dateStr = `${String(d.getMonth() + 1).padStart(2, "0")}/${String(d.getDate()).padStart(
