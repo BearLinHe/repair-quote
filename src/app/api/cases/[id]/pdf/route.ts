@@ -59,6 +59,7 @@ export async function GET(
     unit_number: c.unit_number,
     driver_name: c.customer_name,
     driver_phone: c.customer_phone,
+    apply_tax: c.apply_tax,
     repairItems: c.repair_items.map((i) => i.name),
     parts: c.parts.map((p) => ({
       name: p.name,

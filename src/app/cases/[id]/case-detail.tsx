@@ -35,6 +35,7 @@ type CaseData = {
   parts_subtotal_cents: number;
   labor_subtotal_cents: number;
   cleaning_fee_cents: number;
+  apply_tax: boolean;
   tax_cents: number;
   grand_total_cents: number;
   repair_items: Array<{ id: string; name: string; sort_order: number }>;
@@ -91,6 +92,20 @@ export function CaseDetail({ caseData }: { caseData: CaseData }) {
     if (res.ok) {
       const data = await res.json();
       setCaseState(data);
+    }
+  };
+
+  const toggleTax = async (apply_tax: boolean) => {
+    setLoading(true);
+    try {
+      await fetch(`/api/cases/${caseId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ apply_tax }),
+      });
+      await refreshCase();
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -614,7 +629,26 @@ export function CaseDetail({ caseData }: { caseData: CaseData }) {
               <p>配件小计：{formatCents(caseState.parts_subtotal_cents)}</p>
               <p>人工小计：{formatCents(caseState.labor_subtotal_cents)}</p>
               <p>清洁费：{formatCents(caseState.cleaning_fee_cents)}</p>
-              <p>税费：{formatCents(caseState.tax_cents)}</p>
+              <div className="flex items-center justify-between gap-3">
+                <p className="shrink-0">
+                  {caseState.apply_tax ? `税费：${formatCents(caseState.tax_cents)}` : "税费：不收取"}
+                </p>
+                {canEditDetails ? (
+                  <label className="flex items-center gap-2 text-sm select-none shrink-0">
+                    <input
+                      type="checkbox"
+                      checked={caseState.apply_tax}
+                      disabled={loading}
+                      onChange={(e) => toggleTax(e.target.checked)}
+                    />
+                    <span>收税</span>
+                  </label>
+                ) : (
+                  <span className="text-sm text-muted-foreground shrink-0">
+                    {caseState.apply_tax ? "收税" : "不收税"}
+                  </span>
+                )}
+              </div>
               <p className="font-bold text-lg">总计：{formatCents(caseState.grand_total_cents)}</p>
             </CardContent>
           </Card>

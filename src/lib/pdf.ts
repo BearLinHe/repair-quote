@@ -39,6 +39,7 @@ export type CasePdfInput = {
   }>;
   labor_subtotal_cents: number;
   cleaning_fee_cents: number;
+  apply_tax?: boolean;
   tax_cents: number;
   grand_total_cents: number;
   /** 可选：中文字体文件字节（如 Noto Sans SC），传入后 PDF 内中文正常显示 */
@@ -170,7 +171,9 @@ export async function generateCasePdf(input: CasePdfInput): Promise<GenerateCase
 
   draw(`Labor Subtotal: ${formatCents(input.labor_subtotal_cents)}`);
   draw(`Cleaning Fee: ${formatCents(input.cleaning_fee_cents)}`);
-  draw(`Tax: ${formatCents(input.tax_cents)}`);
+  if (input.apply_tax !== false) {
+    draw(`Tax: ${formatCents(input.tax_cents)}`);
+  }
   draw(`Grand Total: ${formatCents(input.grand_total_cents)}`, { bold: true });
 
   // 签名区域固定在页面下部，避免跟上面内容太接近

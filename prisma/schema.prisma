@@ -31,6 +31,7 @@ model Case {
   parts_subtotal_cents Int       @default(0)
   labor_subtotal_cents Int       @default(0)
   cleaning_fee_cents   Int       @default(0)
+  apply_tax            Boolean   @default(true)
   tax_cents            Int       @default(0)
   grand_total_cents    Int       @default(0)
   notes                String?

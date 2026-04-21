@@ -5,10 +5,11 @@ import { prisma } from "@/lib/db";
  * Call after any change to repair items/parts/labor (or when settings change).
  */
 export async function recalcTotals(caseId: string): Promise<void> {
-  const [settings, parts, labor] = await Promise.all([
+  const [settings, parts, labor, c] = await Promise.all([
     prisma.setting.findFirst({ orderBy: { updated_at: "desc" } }),
     prisma.casePart.findMany({ where: { case_id: caseId } }),
     prisma.caseLabor.findMany({ where: { case_id: caseId } }),
+    prisma.case.findUnique({ where: { id: caseId }, select: { apply_tax: true } }),
   ]);
 
   const parts_subtotal_cents = parts.reduce((s, p) => s + p.line_total_cents, 0);
@@ -24,7 +25,8 @@ export async function recalcTotals(caseId: string): Promise<void> {
   );
 
   const subtotal = parts_subtotal_cents + labor_subtotal_cents + cleaning_fee_cents;
-  const tax_cents = Math.round(subtotal * (tax_rate_bps / 10000));
+  const apply_tax = c?.apply_tax ?? true;
+  const tax_cents = apply_tax ? Math.round(subtotal * (tax_rate_bps / 10000)) : 0;
   const grand_total_cents = subtotal + tax_cents;
 
   await prisma.case.update({
@@ -33,6 +35,7 @@ export async function recalcTotals(caseId: string): Promise<void> {
       parts_subtotal_cents,
       labor_subtotal_cents,
       cleaning_fee_cents,
+      apply_tax,
       tax_cents,
       grand_total_cents,
     },
