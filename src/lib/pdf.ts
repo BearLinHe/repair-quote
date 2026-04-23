@@ -39,6 +39,7 @@ export type CasePdfInput = {
   }>;
   labor_subtotal_cents: number;
   cleaning_fee_cents: number;
+  apply_cleaning?: boolean;
   apply_tax?: boolean;
   tax_cents: number;
   grand_total_cents: number;
@@ -172,7 +173,9 @@ export async function generateCasePdf(input: CasePdfInput): Promise<GenerateCase
   }
 
   draw(`Labor Subtotal: ${formatCents(input.labor_subtotal_cents)}`);
-  draw(`Cleaning Fee: ${formatCents(input.cleaning_fee_cents)}`);
+  if (input.apply_cleaning !== false) {
+    draw(`Cleaning Fee: ${formatCents(input.cleaning_fee_cents)}`);
+  }
   if (input.apply_tax !== false) {
     draw(`Tax: ${formatCents(input.tax_cents)}`);
   }

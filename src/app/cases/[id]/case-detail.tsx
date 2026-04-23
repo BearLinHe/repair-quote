@@ -35,6 +35,7 @@ type CaseData = {
   parts_subtotal_cents: number;
   labor_subtotal_cents: number;
   cleaning_fee_cents: number;
+  apply_cleaning: boolean;
   apply_tax: boolean;
   tax_cents: number;
   grand_total_cents: number;
@@ -102,6 +103,20 @@ export function CaseDetail({ caseData }: { caseData: CaseData }) {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ apply_tax }),
+      });
+      await refreshCase();
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const toggleCleaning = async (apply_cleaning: boolean) => {
+    setLoading(true);
+    try {
+      await fetch(`/api/cases/${caseId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ apply_cleaning }),
       });
       await refreshCase();
     } finally {
@@ -628,7 +643,28 @@ export function CaseDetail({ caseData }: { caseData: CaseData }) {
             <CardContent className="p-4 sm:pt-6 sm:p-6 space-y-2">
               <p>配件小计：{formatCents(caseState.parts_subtotal_cents)}</p>
               <p>人工小计：{formatCents(caseState.labor_subtotal_cents)}</p>
-              <p>清洁费：{formatCents(caseState.cleaning_fee_cents)}</p>
+              <div className="flex items-center justify-between gap-3">
+                <p className="shrink-0">
+                  {caseState.apply_cleaning
+                    ? `清洁费：${formatCents(caseState.cleaning_fee_cents)}`
+                    : "清洁费：不收取"}
+                </p>
+                {canEditDetails ? (
+                  <label className="flex items-center gap-2 text-sm select-none shrink-0">
+                    <input
+                      type="checkbox"
+                      checked={caseState.apply_cleaning}
+                      disabled={loading}
+                      onChange={(e) => toggleCleaning(e.target.checked)}
+                    />
+                    <span>收清洁费</span>
+                  </label>
+                ) : (
+                  <span className="text-sm text-muted-foreground shrink-0">
+                    {caseState.apply_cleaning ? "收清洁费" : "不收清洁费"}
+                  </span>
+                )}
+              </div>
               <div className="flex items-center justify-between gap-3">
                 <p className="shrink-0">
                   {caseState.apply_tax ? `税费：${formatCents(caseState.tax_cents)}` : "税费：不收取"}

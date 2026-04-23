@@ -9,7 +9,10 @@ export async function recalcTotals(caseId: string): Promise<void> {
     prisma.setting.findFirst({ orderBy: { updated_at: "desc" } }),
     prisma.casePart.findMany({ where: { case_id: caseId } }),
     prisma.caseLabor.findMany({ where: { case_id: caseId } }),
-    prisma.case.findUnique({ where: { id: caseId }, select: { apply_tax: true } }),
+    prisma.case.findUnique({
+      where: { id: caseId },
+      select: { apply_tax: true, apply_cleaning: true },
+    }),
   ]);
 
   const parts_subtotal_cents = parts.reduce((s, p) => s + p.line_total_cents, 0);
@@ -19,10 +22,13 @@ export async function recalcTotals(caseId: string): Promise<void> {
   const cleaning_cap_cents = settings?.cleaning_cap_cents ?? 20000;
   const tax_rate_bps = settings?.tax_rate_bps ?? 1075;
 
-  const cleaning_fee_cents = Math.min(
-    Math.round((parts_subtotal_cents + labor_subtotal_cents) * (cleaning_rate_bps / 10000)),
-    cleaning_cap_cents
-  );
+  const apply_cleaning = c?.apply_cleaning ?? true;
+  const cleaning_fee_cents = apply_cleaning
+    ? Math.min(
+        Math.round((parts_subtotal_cents + labor_subtotal_cents) * (cleaning_rate_bps / 10000)),
+        cleaning_cap_cents
+      )
+    : 0;
 
   const subtotal = parts_subtotal_cents + labor_subtotal_cents + cleaning_fee_cents;
   const apply_tax = c?.apply_tax ?? true;

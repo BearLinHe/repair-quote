@@ -56,8 +56,13 @@ export async function PATCH(
     return Response.json({ error: "Case is read-only" }, { status: 400 });
   }
   const body = await req.json().catch(() => ({}));
-  const apply_tax = Boolean(body.apply_tax);
-  await prisma.case.update({ where: { id }, data: { apply_tax } });
+  const data: { apply_tax?: boolean; apply_cleaning?: boolean } = {};
+  if ("apply_tax" in body) data.apply_tax = Boolean(body.apply_tax);
+  if ("apply_cleaning" in body) data.apply_cleaning = Boolean(body.apply_cleaning);
+  if (Object.keys(data).length === 0) {
+    return Response.json({ error: "Expected apply_tax and/or apply_cleaning" }, { status: 400 });
+  }
+  await prisma.case.update({ where: { id }, data });
   await recalcTotals(id);
   const updated = await prisma.case.findUnique({ where: { id } });
   return Response.json(updated);
