@@ -15,12 +15,51 @@ function formatCents(c: number) {
   return `$${formatted}`;
 }
 
+function wrapText(text: string, maxWidth: number, measure: (value: string) => number): string[] {
+  const normalized = text.replace(/\s+/g, " ").trim();
+  if (!normalized) return [""];
+
+  const lines: string[] = [];
+  let current = "";
+  for (const word of normalized.split(" ")) {
+    const candidate = current ? `${current} ${word}` : word;
+    if (measure(candidate) <= maxWidth) {
+      current = candidate;
+      continue;
+    }
+
+    if (current) {
+      lines.push(current);
+      current = "";
+    }
+
+    if (measure(word) <= maxWidth) {
+      current = word;
+      continue;
+    }
+
+    let fragment = "";
+    for (const char of word) {
+      const fragmentCandidate = fragment + char;
+      if (fragment && measure(fragmentCandidate) > maxWidth) {
+        lines.push(fragment);
+        fragment = char;
+      } else {
+        fragment = fragmentCandidate;
+      }
+    }
+    current = fragment;
+  }
+  if (current) lines.push(current);
+  return lines.length ? lines : [""];
+}
+
 export type CasePdfInput = {
   companyName: string;
   date: Date;
   plate: string | null;
   vin: string | null;
-  unit_number: number | null;
+  unit_number: string | null;
   driver_name: string | null;
   driver_phone: string | null;
   status: string;
@@ -51,8 +90,10 @@ export type GenerateCasePdfResult = { pdfBytes: Uint8Array; usedCustomFont: bool
 
 export async function generateCasePdf(input: CasePdfInput): Promise<GenerateCasePdfResult> {
   const doc = await PDFDocument.create();
-  let font: PDFFont;
-  let fontBold: PDFFont;
+  const latinFont = await doc.embedFont(StandardFonts.Helvetica);
+  const latinFontBold = await doc.embedFont(StandardFonts.HelveticaBold);
+  let font: PDFFont = latinFont;
+  let fontBold: PDFFont = latinFontBold;
   /** 有中文字体时直接显示原文，否则用英文/词汇表并替换非 ASCII 为 ? */
   let useCustomFont = false;
   if (input.customFontBytes && input.customFontBytes.length > 0) {
@@ -63,27 +104,90 @@ export async function generateCasePdf(input: CasePdfInput): Promise<GenerateCase
       useCustomFont = true;
     } catch (e) {
       console.warn("PDF 中文字体嵌入失败，将使用 Helvetica:", e instanceof Error ? e.message : e);
-      font = await doc.embedFont(StandardFonts.Helvetica);
-      fontBold = await doc.embedFont(StandardFonts.HelveticaBold);
+      font = latinFont;
+      fontBold = latinFontBold;
     }
   } else {
-    font = await doc.embedFont(StandardFonts.Helvetica);
-    fontBold = await doc.embedFont(StandardFonts.HelveticaBold);
+    font = latinFont;
+    fontBold = latinFontBold;
   }
   const textForPdf = useCustomFont ? (str: string) => (str ?? "") : (str: string) => toPdfSafe(str ?? "");
 
-  const page = doc.addPage([612, 792]);
+  let page = doc.addPage([612, 792]);
   const { height, width } = page.getSize();
   // 整体内容稍微往下移动，避免太贴近页面顶部
   let y = height - 80;
   const left = 50;
   const lineHeight = 20;
   const smallLine = 14;
+  const contentBottom = 110;
+
+  const fontForChar = (char: string, bold: boolean) => {
+    const needsCustomFont = useCustomFont && /[^\x20-\x7E]/.test(char);
+    if (needsCustomFont) return bold ? fontBold : font;
+    return bold ? latinFontBold : latinFont;
+  };
+
+  const textRuns = (text: string, bold = false) => {
+    const runs: Array<{ text: string; font: PDFFont }> = [];
+    for (const char of text) {
+      const runFont = fontForChar(char, bold);
+      const previous = runs[runs.length - 1];
+      if (previous?.font === runFont) previous.text += char;
+      else runs.push({ text: char, font: runFont });
+    }
+    return runs;
+  };
+
+  const measureText = (text: string, size: number, bold = false) =>
+    textRuns(text, bold).reduce(
+      (width, run) => width + run.font.widthOfTextAtSize(run.text, size),
+      0,
+    );
+
+  const drawText = (
+    text: string,
+    options: { x: number; y: number; size: number; bold?: boolean },
+  ) => {
+    let x = options.x;
+    for (const run of textRuns(text, options.bold)) {
+      page.drawText(run.text, {
+        x,
+        y: options.y,
+        size: options.size,
+        font: run.font,
+        color: rgb(0, 0, 0),
+      });
+      x += run.font.widthOfTextAtSize(run.text, options.size);
+    }
+  };
+
+  const addContinuationPage = () => {
+    page = doc.addPage([612, 792]);
+    y = height - 60;
+    drawText(textForPdf(input.companyName), {
+      x: left,
+      y,
+      size: 14,
+      bold: true,
+    });
+    drawText("Invoice — Continued", {
+      x: width - 170,
+      y,
+      size: 12,
+      bold: true,
+    });
+    y -= 28;
+  };
+
+  const ensureSpace = (requiredHeight: number) => {
+    if (y - requiredHeight < contentBottom) addContinuationPage();
+  };
 
   const draw = (text: string, opts?: { bold?: boolean; size?: number }) => {
-    const f = opts?.bold ? fontBold : font;
+    ensureSpace(lineHeight);
     const size = opts?.size ?? 12;
-    page.drawText(text, { x: left, y, size, font: f, color: rgb(0, 0, 0) });
+    drawText(text, { x: left, y, size, bold: opts?.bold });
     y -= lineHeight;
   };
 
@@ -91,14 +195,13 @@ export async function generateCasePdf(input: CasePdfInput): Promise<GenerateCase
   draw(textForPdf(input.companyName), { bold: true, size: 20 });
   const invoiceTitle = "Invoice";
   const invoiceSize = 16;
-  const invoiceWidth = fontBold.widthOfTextAtSize(invoiceTitle, invoiceSize);
+  const invoiceWidth = measureText(invoiceTitle, invoiceSize, true);
   const companyBaselineY = y + lineHeight;
-  page.drawText(invoiceTitle, {
+  drawText(invoiceTitle, {
     x: width - invoiceWidth - 50,
     y: companyBaselineY,
     size: invoiceSize,
-    font: fontBold,
-    color: rgb(0, 0, 0),
+    bold: true,
   });
   draw("25503 Industrial Blvd, Hayward, CA 94545", { size: 11 });
   draw("Tel: 4159679959", { size: 11 });
@@ -132,46 +235,71 @@ export async function generateCasePdf(input: CasePdfInput): Promise<GenerateCase
   if (input.repairItems.length) {
     draw("Repair Items:", { bold: true, size: 13 });
     input.repairItems.forEach((name) => {
-      page.drawText("• " + textForPdf(name), { x: left + 8, y, size: 11, font, color: rgb(0, 0, 0) });
+      ensureSpace(smallLine);
+      drawText("• " + textForPdf(name), { x: left + 8, y, size: 11 });
       y -= smallLine;
     });
     y -= 10;
   }
 
   if (input.parts.length) {
-    draw("Parts", { bold: true, size: 13 });
-    page.drawText("Name", { x: left, y, size: 11, font: fontBold, color: rgb(0, 0, 0) });
-    page.drawText("Qty", { x: left + 200, y, size: 11, font: fontBold, color: rgb(0, 0, 0) });
-    page.drawText("Unit Price", { x: left + 260, y, size: 11, font: fontBold, color: rgb(0, 0, 0) });
-    page.drawText("Line Total", { x: left + 360, y, size: 11, font: fontBold, color: rgb(0, 0, 0) });
-    y -= smallLine;
-    input.parts.forEach((p) => {
-      page.drawText(textForPdf(p.name).slice(0, 28), { x: left, y, size: 11, font, color: rgb(0, 0, 0) });
-      page.drawText(String(p.qty), { x: left + 200, y, size: 11, font, color: rgb(0, 0, 0) });
-      page.drawText(formatCents(p.unit_price_cents), { x: left + 260, y, size: 11, font, color: rgb(0, 0, 0) });
-      page.drawText(formatCents(p.line_total_cents), { x: left + 360, y, size: 11, font, color: rgb(0, 0, 0) });
+    const drawPartsHeader = () => {
+      draw("Parts", { bold: true, size: 13 });
+      drawText("Name", { x: left, y, size: 11, bold: true });
+      drawText("Qty", { x: left + 200, y, size: 11, bold: true });
+      drawText("Unit Price", { x: left + 260, y, size: 11, bold: true });
+      drawText("Line Total", { x: left + 360, y, size: 11, bold: true });
       y -= smallLine;
+    };
+    drawPartsHeader();
+    input.parts.forEach((p) => {
+      const nameLines = wrapText(textForPdf(p.name), 185, (value) => measureText(value, 11));
+      const rowHeight = Math.max(smallLine, nameLines.length * smallLine);
+      if (y - rowHeight < contentBottom) {
+        addContinuationPage();
+        drawPartsHeader();
+      }
+      nameLines.forEach((line, index) => {
+        drawText(line, {
+          x: left,
+          y: y - index * smallLine,
+          size: 11,
+        });
+      });
+      drawText(String(p.qty), { x: left + 200, y, size: 11 });
+      drawText(formatCents(p.unit_price_cents), { x: left + 260, y, size: 11 });
+      drawText(formatCents(p.line_total_cents), { x: left + 360, y, size: 11 });
+      y -= rowHeight;
     });
     y -= 10;
   }
 
   if (input.labor.length) {
-    draw("Labor", { bold: true, size: 13 });
-    page.drawText("Name", { x: left, y, size: 11, font: fontBold, color: rgb(0, 0, 0) });
-    page.drawText("Hours", { x: left + 200, y, size: 11, font: fontBold, color: rgb(0, 0, 0) });
-    page.drawText("Rate", { x: left + 280, y, size: 11, font: fontBold, color: rgb(0, 0, 0) });
-    page.drawText("Line Total", { x: left + 360, y, size: 11, font: fontBold, color: rgb(0, 0, 0) });
-    y -= smallLine;
+    const drawLaborHeader = () => {
+      draw("Labor", { bold: true, size: 13 });
+      drawText("Name", { x: left, y, size: 11, bold: true });
+      drawText("Hours", { x: left + 200, y, size: 11, bold: true });
+      drawText("Rate", { x: left + 280, y, size: 11, bold: true });
+      drawText("Line Total", { x: left + 360, y, size: 11, bold: true });
+      y -= smallLine;
+    };
+    drawLaborHeader();
     input.labor.forEach((l) => {
-      page.drawText(textForPdf(l.name).slice(0, 28), { x: left, y, size: 11, font, color: rgb(0, 0, 0) });
-      page.drawText(String(l.hours), { x: left + 200, y, size: 11, font, color: rgb(0, 0, 0) });
-      page.drawText(formatCents(l.rate_cents), { x: left + 280, y, size: 11, font, color: rgb(0, 0, 0) });
-      page.drawText(formatCents(l.line_total_cents), { x: left + 360, y, size: 11, font, color: rgb(0, 0, 0) });
+      if (y - smallLine < contentBottom) {
+        addContinuationPage();
+        drawLaborHeader();
+      }
+      drawText(textForPdf(l.name).slice(0, 28), { x: left, y, size: 11 });
+      drawText(String(l.hours), { x: left + 200, y, size: 11 });
+      drawText(formatCents(l.rate_cents), { x: left + 280, y, size: 11 });
+      drawText(formatCents(l.line_total_cents), { x: left + 360, y, size: 11 });
       y -= smallLine;
     });
     y -= 10;
   }
 
+  // Keep totals together and reserve the bottom of the final page for signatures.
+  if (y < 210) addContinuationPage();
   draw(`Labor Subtotal: ${formatCents(input.labor_subtotal_cents)}`);
   if (input.apply_cleaning !== false) {
     draw(`Cleaning Fee: ${formatCents(input.cleaning_fee_cents)}`);
@@ -183,20 +311,16 @@ export async function generateCasePdf(input: CasePdfInput): Promise<GenerateCase
 
   // 签名区域固定在页面下部，避免跟上面内容太接近
   y = 80;
-  page.drawText("Customer Signature: _________________________________________", {
+  drawText("Customer Signature: _________________________________________", {
     x: left,
     y,
     size: 12,
-    font,
-    color: rgb(0, 0, 0),
   });
   y -= 24;
-  page.drawText("Date: _________________________________________", {
+  drawText("Date: _________________________________________", {
     x: left,
     y,
     size: 12,
-    font,
-    color: rgb(0, 0, 0),
   });
 
   const pdfBytes = await doc.save();

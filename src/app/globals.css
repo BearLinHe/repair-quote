@@ -55,13 +55,18 @@
   }
   body {
     color: var(--foreground);
-    background: var(--background);
+    background:
+      radial-gradient(circle at 10% 0%, color-mix(in srgb, var(--primary) 8%, transparent), transparent 28rem),
+      var(--background);
     padding-left: env(safe-area-inset-left);
     padding-right: env(safe-area-inset-right);
     padding-bottom: env(safe-area-inset-bottom);
   }
   * {
     border-color: var(--border);
+  }
+  ::selection {
+    background: color-mix(in srgb, var(--primary) 22%, transparent);
   }
   /* 移动端输入框至少 44px 高，避免 iOS 缩放 */
   @media (max-width: 640px) {

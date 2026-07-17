@@ -1,6 +1,6 @@
 import { clerkMiddleware, createRouteMatcher } from "@clerk/nextjs/server";
 
-const isAppRoute = createRouteMatcher(["/dashboard(.*)", "/cases(.*)", "/app(.*)"]);
+const isAppRoute = createRouteMatcher(["/dashboard(.*)", "/cases(.*)", "/settings(.*)", "/app(.*)"]);
 
 export default clerkMiddleware(async (auth, req) => {
   if (isAppRoute(req)) {

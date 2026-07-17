@@ -1,15 +1,10 @@
 import { NextRequest } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/db";
-import { requireAuth } from "@/lib/auth";
+import { requireAuth, unauthorizedResponse } from "@/lib/auth";
 import type { CaseStatus } from "@prisma/client";
-
-const transitions: Record<CaseStatus, CaseStatus[]> = {
-  SUBMITTED: ["IN_PROGRESS", "CANCELED"],
-  IN_PROGRESS: ["COMPLETED", "CANCELED"],
-  CANCELED: [],
-  COMPLETED: [],
-};
+import { canTransitionCase } from "@/lib/case-rules";
+import { apiError } from "@/lib/api-error";
 
 const bodySchema = z.object({
   to_status: z.enum(["SUBMITTED", "IN_PROGRESS", "CANCELED", "COMPLETED"]),
@@ -21,23 +16,20 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> }
 ) {
   const userId = await requireAuth();
+  if (!userId) return unauthorizedResponse();
   const { id } = await params;
   const c = await prisma.case.findUnique({
     where: { id },
     select: { id: true, clerk_user_id: true, status: true },
   });
-  if (!c || c.clerk_user_id !== userId) return Response.json({ error: "Not found" }, { status: 404 });
+  if (!c || c.clerk_user_id !== userId) return apiError("CASE_NOT_FOUND", "维修单不存在", 404);
 
   const body = await req.json();
   const parsed = bodySchema.safeParse(body);
-  if (!parsed.success) return Response.json({ error: parsed.error.flatten() }, { status: 400 });
+  if (!parsed.success) return apiError("VALIDATION_ERROR", "状态信息格式不正确", 400, parsed.error.flatten());
   const to_status = parsed.data.to_status as CaseStatus;
-  const allowed = transitions[c.status];
-  if (!allowed.includes(to_status)) {
-    return Response.json(
-      { error: `Transition from ${c.status} to ${to_status} not allowed` },
-      { status: 400 }
-    );
+  if (!canTransitionCase(c.status, to_status)) {
+    return apiError("INVALID_STATUS_TRANSITION", "当前状态不允许执行此操作", 409);
   }
 
   await prisma.$transaction([

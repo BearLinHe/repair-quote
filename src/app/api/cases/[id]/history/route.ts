@@ -1,19 +1,21 @@
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/db";
-import { requireAuth } from "@/lib/auth";
+import { requireAuth, unauthorizedResponse } from "@/lib/auth";
+import { apiError } from "@/lib/api-error";
 
 export async function GET(
   _req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
   const userId = await requireAuth();
+  if (!userId) return unauthorizedResponse();
   const { id } = await params;
   const c = await prisma.case.findUnique({
     where: { id },
     select: { clerk_user_id: true },
   });
   if (!c || c.clerk_user_id !== userId) {
-    return Response.json({ error: "Not found" }, { status: 404 });
+    return apiError("CASE_NOT_FOUND", "维修单不存在", 404);
   }
 
   const [repairItems, parts, labor] = await Promise.all([

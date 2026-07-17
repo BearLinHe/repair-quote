@@ -2,7 +2,8 @@ import { NextRequest } from "next/server";
 import { readFile } from "fs/promises";
 import { join } from "path";
 import { prisma } from "@/lib/db";
-import { requireAuth } from "@/lib/auth";
+import { requireAuth, unauthorizedResponse } from "@/lib/auth";
+import { apiError } from "@/lib/api-error";
 import { generateCasePdf } from "@/lib/pdf";
 
 /** PDF 中文字体：仅使用 NotoSerifSC-Medium.ttf */
@@ -26,6 +27,7 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> }
 ) {
   const userId = await requireAuth();
+  if (!userId) return unauthorizedResponse();
   const { id } = await params;
   const c = await prisma.case.findUnique({
     where: { id },
@@ -36,10 +38,10 @@ export async function GET(
     },
   });
   if (!c || c.clerk_user_id !== userId) {
-    return Response.json({ error: "Not found" }, { status: 404 });
+    return apiError("CASE_NOT_FOUND", "维修单不存在", 404);
   }
 
-  const settings = await prisma.setting.findFirst({ orderBy: { updated_at: "desc" } });
+  const settings = await prisma.setting.findUnique({ where: { id: "default" } });
   const companyName = settings?.company_name ?? "YaoYuan Inc.";
 
   const customFontBytes = await getChineseFontBytes();
@@ -48,7 +50,6 @@ export async function GET(
   } else {
     console.warn("PDF: 未加载中文字体，中文将显示为 ???");
   }
-  const statusTextZh = { SUBMITTED: "已提交", IN_PROGRESS: "进行中", CANCELED: "已取消", COMPLETED: "已完成" }[c.status] ?? c.status;
   const statusTextEn = { SUBMITTED: "Submitted", IN_PROGRESS: "In Progress", CANCELED: "Canceled", COMPLETED: "Completed" }[c.status] ?? c.status;
 
   const baseInput = {
@@ -84,7 +85,7 @@ export async function GET(
   try {
     result = await generateCasePdf({
       ...baseInput,
-      status: customFontBytes ? statusTextZh : statusTextEn,
+      status: statusTextEn,
       customFontBytes,
     });
   } catch (err) {
@@ -98,10 +99,7 @@ export async function GET(
       result = { ...result, usedCustomFont: false };
     } catch (fallbackErr) {
       console.error("PDF generation failed:", fallbackErr);
-      return Response.json(
-        { error: "PDF generation failed", details: fallbackErr instanceof Error ? fallbackErr.message : String(fallbackErr) },
-        { status: 500 }
-      );
+      return apiError("PDF_GENERATION_FAILED", "PDF 生成失败，请稍后重试", 500);
     }
   }
 

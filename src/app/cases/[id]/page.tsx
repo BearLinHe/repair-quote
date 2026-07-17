@@ -26,11 +26,18 @@ export default async function CaseDetailPage({ params }: { params: Promise<{ id:
     changed_at: l.changed_at.toISOString(),
   }));
   return (
-    <div className="container mx-auto py-8 px-4 pb-14 sm:py-10 sm:px-6 sm:pb-16">
-      <div className="mb-6">
+    <div className="mx-auto max-w-7xl px-4 py-6 pb-14 sm:px-6 sm:py-10 sm:pb-16 lg:px-8">
+      <div className="mb-6 flex flex-col gap-2">
         <Link href="/dashboard" className="text-primary hover:underline inline-flex items-center min-h-[44px]">
           ← 返回列表
         </Link>
+        <div>
+          <p className="text-sm font-medium text-primary">维修单详情</p>
+          <h1 className="mt-1 text-2xl font-bold tracking-tight sm:text-3xl">
+            {c.plate ?? c.vin ?? `车号 ${c.unit_number ?? "-"}`}
+          </h1>
+          <p className="mt-1 text-sm text-muted-foreground">查看车辆资料、维修明细、费用和状态记录。</p>
+        </div>
       </div>
       <CaseDetail
         caseData={{

@@ -2,12 +2,15 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import { formatCents } from "@/lib/utils";
+import { Button, buttonVariants } from "@/components/ui/button";
+import { Inbox, RefreshCw, Search } from "lucide-react";
 
 type CaseRow = {
   id: string;
   plate: string | null;
   vin: string | null;
-  unit_number: number | null;
+  unit_number: string | null;
   status: string;
   grand_total_cents: number;
   created_at: string;
@@ -17,98 +20,146 @@ export function CaseList() {
   const [cases, setCases] = useState<CaseRow[]>([]);
   const [query, setQuery] = useState("");
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<"unauthorized" | "server" | "network" | null>(null);
+  const [retryKey, setRetryKey] = useState(0);
 
   useEffect(() => {
-    const q = new URLSearchParams();
-    if (query.trim()) q.set("query", query.trim());
-    fetch(`/api/cases?${q}`)
-      .then(async (r) => {
-        const text = await r.text();
-        if (!text.trim()) return { cases: [] };
-        try {
-          return JSON.parse(text) as { cases?: CaseRow[]; error?: unknown };
-        } catch {
-          return { cases: [] };
-        }
-      })
-      .then((data) => {
-        if (data.error) return;
-        setCases(data.cases ?? []);
-      })
-      .catch(() => setCases([]))
-      .finally(() => setLoading(false));
-  }, [query]);
+    const controller = new AbortController();
+    setLoading(true);
+    setError(null);
 
-  const formatCents = (c: number) => `${(c / 100).toFixed(2)} 元`;
+    const timer = window.setTimeout(async () => {
+      const q = new URLSearchParams();
+      if (query.trim()) q.set("query", query.trim());
+
+      try {
+        const response = await fetch(`/api/cases?${q}`, { signal: controller.signal });
+        if (response.status === 401) {
+          setError("unauthorized");
+          return;
+        }
+        if (!response.ok) {
+          setError("server");
+          return;
+        }
+        const data = (await response.json()) as { cases?: CaseRow[] };
+        setCases(data.cases ?? []);
+      } catch (requestError) {
+        if (requestError instanceof DOMException && requestError.name === "AbortError") return;
+        setError("network");
+      } finally {
+        if (!controller.signal.aborted) setLoading(false);
+      }
+    }, 400);
+
+    return () => {
+      window.clearTimeout(timer);
+      controller.abort();
+    };
+  }, [query, retryKey]);
+
   const statusLabel = (s: string) =>
     ({ SUBMITTED: "已提交", IN_PROGRESS: "进行中", CANCELED: "已取消", COMPLETED: "已完成" })[s] ?? s;
+  const statusClass = (s: string) =>
+    ({
+      SUBMITTED: "bg-sky-50 text-sky-700 ring-sky-600/20",
+      IN_PROGRESS: "bg-amber-50 text-amber-700 ring-amber-600/20",
+      COMPLETED: "bg-emerald-50 text-emerald-700 ring-emerald-600/20",
+      CANCELED: "bg-slate-100 text-slate-600 ring-slate-500/20",
+    })[s] ?? "bg-muted text-muted-foreground ring-border";
 
   return (
     <div className="space-y-4">
-      <div className="flex gap-2">
+      <div className="relative max-w-2xl">
+        <Search className="pointer-events-none absolute left-3.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
         <input
           type="search"
           placeholder="搜索车牌 / 车架号 / 车号"
-          className="flex-1 min-h-[44px] rounded-lg border border-input bg-background px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+          className="min-h-12 w-full rounded-xl border border-input bg-card py-2.5 pl-10 pr-4 text-sm shadow-sm outline-none transition-shadow placeholder:text-muted-foreground focus:ring-2 focus:ring-ring/30"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
         />
       </div>
       {loading ? (
-        <p className="text-muted-foreground py-4">加载中...</p>
+        <div className="flex min-h-40 items-center justify-center gap-2 text-sm text-muted-foreground" aria-live="polite">
+          <RefreshCw className="size-4 animate-spin" />
+          正在加载维修单...
+        </div>
+      ) : error === "unauthorized" ? (
+        <div className="rounded-lg border border-amber-200 bg-amber-50 p-6 text-center">
+          <p className="font-medium text-amber-950">登录已失效</p>
+          <p className="mt-1 text-sm text-amber-800">请重新登录后继续查看维修单。</p>
+          <Link href="/sign-in" className={buttonVariants({ className: "mt-4" })}>
+            重新登录
+          </Link>
+        </div>
+      ) : error ? (
+        <div className="rounded-lg border border-destructive/30 bg-destructive/5 p-6 text-center">
+          <p className="font-medium text-destructive">
+            {error === "network" ? "网络连接失败" : "维修单加载失败"}
+          </p>
+          <p className="mt-1 text-sm text-muted-foreground">请稍后重试，已有数据不会受到影响。</p>
+          <Button variant="outline" className="mt-4" onClick={() => setRetryKey((key) => key + 1)}>
+            重新加载
+          </Button>
+        </div>
       ) : cases.length === 0 ? (
-        <div className="rounded-lg border border-border bg-card p-8 text-center text-muted-foreground">
-          暂无维修单
+        <div className="rounded-2xl border border-dashed border-border bg-card/70 p-10 text-center text-muted-foreground sm:p-14">
+          <Inbox className="mx-auto mb-3 size-9 text-muted-foreground/70" />
+          <p className="font-medium text-foreground">暂无维修单</p>
+          <p className="mt-1 text-sm">新建维修单后会显示在这里。</p>
         </div>
       ) : (
         <>
           {/* 移动端：卡片列表 */}
-          <div className="block sm:hidden space-y-3">
+          <div className="space-y-3 sm:hidden">
             {cases.map((c) => (
               <Link
                 key={c.id}
                 href={`/cases/${c.id}`}
-                className="flex flex-col gap-2 rounded-lg border border-border bg-card p-4 shadow-sm active:bg-muted/50 transition-colors"
+                className="flex flex-col gap-3 rounded-2xl border border-border/80 bg-card p-4 shadow-sm transition-all active:scale-[0.99] active:bg-muted/40"
               >
                 <div className="flex justify-between items-start">
-                  <span className="font-medium">{c.plate ?? c.vin ?? `车号 ${c.unit_number ?? "-"}`}</span>
-                  <span className="text-primary text-sm font-medium">详情 →</span>
+                  <span className="font-semibold">{c.plate ?? c.vin ?? `车号 ${c.unit_number ?? "-"}`}</span>
+                  <span className={`rounded-full px-2.5 py-1 text-xs font-medium ring-1 ring-inset ${statusClass(c.status)}`}>
+                    {statusLabel(c.status)}
+                  </span>
                 </div>
                 <div className="flex flex-wrap gap-x-3 gap-y-1 text-sm text-muted-foreground">
-                  <span>状态：{statusLabel(c.status)}</span>
-                  <span>总价：{formatCents(c.grand_total_cents)}</span>
+                  <span className="font-medium text-foreground">{formatCents(c.grand_total_cents)}</span>
                   <span>{new Date(c.created_at).toLocaleDateString("zh-CN")}</span>
+                  <span className="ml-auto font-medium text-primary">查看详情 →</span>
                 </div>
               </Link>
             ))}
           </div>
           {/* 桌面端：表格 */}
-          <div className="hidden sm:block rounded-lg border border-border overflow-hidden">
+          <div className="hidden overflow-hidden rounded-2xl border border-border/80 bg-card shadow-sm sm:block">
             <div className="overflow-x-auto">
-              <table className="w-full text-sm">
+              <table className="w-full min-w-[780px] text-sm">
                 <thead>
-                  <tr className="border-b bg-muted/50">
-                    <th className="p-3 text-left font-medium">车牌</th>
-                    <th className="p-3 text-left font-medium">车架号</th>
-                    <th className="p-3 text-left font-medium">车号</th>
-                    <th className="p-3 text-left font-medium">状态</th>
-                    <th className="p-3 text-right font-medium">总价</th>
-                    <th className="p-3 text-left font-medium">创建时间</th>
-                    <th className="p-3"></th>
+                  <tr className="border-b bg-muted/60 text-xs uppercase tracking-wide text-muted-foreground">
+                    <th className="px-4 py-3.5 text-left font-semibold">车牌</th>
+                    <th className="px-4 py-3.5 text-left font-semibold">车架号</th>
+                    <th className="px-4 py-3.5 text-left font-semibold">车号</th>
+                    <th className="px-4 py-3.5 text-left font-semibold">状态</th>
+                    <th className="px-4 py-3.5 text-right font-semibold">总价</th>
+                    <th className="px-4 py-3.5 text-left font-semibold">创建时间</th>
+                    <th className="px-4 py-3.5"></th>
                   </tr>
                 </thead>
                 <tbody>
                   {cases.map((c) => (
-                    <tr key={c.id} className="border-b hover:bg-muted/30 transition-colors">
-                      <td className="p-3">{c.plate ?? "-"}</td>
-                      <td className="p-3">{c.vin ?? "-"}</td>
-                      <td className="p-3">{c.unit_number ?? "-"}</td>
-                      <td className="p-3">{statusLabel(c.status)}</td>
-                      <td className="p-3 text-right">{formatCents(c.grand_total_cents)}</td>
-                      <td className="p-3 text-muted-foreground">
+                    <tr key={c.id} className="border-b last:border-0 hover:bg-muted/30 transition-colors">
+                      <td className="px-4 py-4 font-medium">{c.plate ?? "-"}</td>
+                      <td className="max-w-52 truncate px-4 py-4 text-muted-foreground">{c.vin ?? "-"}</td>
+                      <td className="px-4 py-4">{c.unit_number ?? "-"}</td>
+                      <td className="px-4 py-4"><span className={`rounded-full px-2.5 py-1 text-xs font-medium ring-1 ring-inset ${statusClass(c.status)}`}>{statusLabel(c.status)}</span></td>
+                      <td className="px-4 py-4 text-right font-semibold tabular-nums">{formatCents(c.grand_total_cents)}</td>
+                      <td className="px-4 py-4 text-muted-foreground">
                         {new Date(c.created_at).toLocaleDateString("zh-CN")}
                       </td>
-                      <td className="p-3">
+                      <td className="px-4 py-4 text-right">
                         <Link
                           href={`/cases/${c.id}`}
                           className="text-primary hover:underline font-medium"

@@ -14,6 +14,8 @@ import {
 } from "@/components/ui/select";
 import { formatCents } from "@/lib/utils";
 import type { CaseStatus } from "@prisma/client";
+import { canEditCaseDetails } from "@/lib/case-rules";
+import { apiErrorMessage } from "@/lib/api-error";
 
 type LaborRow = {
   id: string;
@@ -27,7 +29,7 @@ type CaseData = {
   id: string;
   plate: string | null;
   vin: string | null;
-  unit_number: number | null;
+  unit_number: string | null;
   customer_name: string | null;
   customer_phone: string | null;
   customer_email: string | null;
@@ -58,6 +60,15 @@ type History = {
   labor_templates: Array<{ name: string; last_rate_cents: number }>;
 };
 
+async function requestJson<T>(url: string, init?: RequestInit): Promise<T> {
+  const response = await fetch(url, init);
+  const data = await response.json().catch(() => null);
+  if (!response.ok) {
+    throw new Error(apiErrorMessage(data, response.status === 401 ? "登录已失效，请重新登录" : "操作失败"));
+  }
+  return data as T;
+}
+
 /** 状态历史时间：按本地时区、统一格式显示，避免显示错乱 */
 function formatStatusLogTime(isoString: string): string {
   const d = new Date(isoString);
@@ -85,87 +96,91 @@ export function CaseDetail({ caseData }: { caseData: CaseData }) {
   const [newLaborRate, setNewLaborRate] = useState("");
   const [statusNote, setStatusNote] = useState("");
   const [loading, setLoading] = useState(false);
+  const [actionError, setActionError] = useState("");
 
   const caseId = caseData.id;
 
   const refreshCase = async () => {
-    const res = await fetch(`/api/cases/${caseId}`);
-    if (res.ok) {
-      const data = await res.json();
-      setCaseState(data);
+    const data = await requestJson<CaseData>(`/api/cases/${caseId}`);
+    setCaseState(data);
+  };
+
+  const performAction = async (action: () => Promise<void>) => {
+    setLoading(true);
+    setActionError("");
+    try {
+      await action();
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : "操作失败，请稍后重试");
+    } finally {
+      setLoading(false);
     }
   };
 
   const toggleTax = async (apply_tax: boolean) => {
-    setLoading(true);
-    try {
-      await fetch(`/api/cases/${caseId}`, {
+    await performAction(async () => {
+      await requestJson(`/api/cases/${caseId}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ apply_tax }),
       });
       await refreshCase();
-    } finally {
-      setLoading(false);
-    }
+    });
   };
 
   const toggleCleaning = async (apply_cleaning: boolean) => {
-    setLoading(true);
-    try {
-      await fetch(`/api/cases/${caseId}`, {
+    await performAction(async () => {
+      await requestJson(`/api/cases/${caseId}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ apply_cleaning }),
       });
       await refreshCase();
-    } finally {
-      setLoading(false);
-    }
+    });
   };
 
   useEffect(() => {
-    fetch(`/api/cases/${caseId}/history`)
-      .then((r) => r.json())
-      .then((data) => setHistory(data));
+    requestJson<History>(`/api/cases/${caseId}/history`)
+      .then((data) => setHistory(data))
+      .catch((error) => setActionError(error instanceof Error ? error.message : "历史数据加载失败"));
   }, [caseId]);
 
   const addRepairItem = async (name: string) => {
     if (!name.trim()) return;
-    setLoading(true);
-    try {
-      const res = await fetch(`/api/cases/${caseId}/repair-items`, {
+    await performAction(async () => {
+      await requestJson(`/api/cases/${caseId}/repair-items`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ name: name.trim() }),
       });
-      if (res.ok) await refreshCase();
-    } finally {
-      setLoading(false);
+      await refreshCase();
       setNewItemName("");
-    }
+    });
   };
 
   const updateRepairItem = async (itemId: string, name: string) => {
     if (!name.trim()) return;
-    await fetch(`/api/cases/${caseId}/repair-items`, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ id: itemId, name: name.trim() }),
+    await performAction(async () => {
+      await requestJson(`/api/cases/${caseId}/repair-items`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: itemId, name: name.trim() }),
+      });
+      await refreshCase();
     });
-    await refreshCase();
   };
 
   const deleteRepairItem = async (itemId: string) => {
-    await fetch(`/api/cases/${caseId}/repair-items?id=${itemId}`, { method: "DELETE" });
-    await refreshCase();
+    await performAction(async () => {
+      await requestJson(`/api/cases/${caseId}/repair-items?id=${itemId}`, { method: "DELETE" });
+      await refreshCase();
+    });
   };
 
   const addPart = async (name: string, unit_price_cents: number, qty: number) => {
     if (!name.trim() || unit_price_cents < 0 || qty < 1) return;
-    setLoading(true);
-    try {
-      await fetch(`/api/cases/${caseId}/parts`, {
+    await performAction(async () => {
+      await requestJson(`/api/cases/${caseId}/parts`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ name: name.trim(), unit_price_cents, qty }),
@@ -174,9 +189,7 @@ export function CaseDetail({ caseData }: { caseData: CaseData }) {
       setNewPartName("");
       setNewPartPrice("");
       setNewPartQty("1");
-    } finally {
-      setLoading(false);
-    }
+    });
   };
 
   const updatePart = async (
@@ -185,24 +198,27 @@ export function CaseDetail({ caseData }: { caseData: CaseData }) {
     unit_price_cents: number,
     qty: number
   ) => {
-    await fetch(`/api/cases/${caseId}/parts`, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ id: partId, name, unit_price_cents, qty }),
+    await performAction(async () => {
+      await requestJson(`/api/cases/${caseId}/parts`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: partId, name, unit_price_cents, qty }),
+      });
+      await refreshCase();
     });
-    await refreshCase();
   };
 
   const deletePart = async (partId: string) => {
-    await fetch(`/api/cases/${caseId}/parts?id=${partId}`, { method: "DELETE" });
-    await refreshCase();
+    await performAction(async () => {
+      await requestJson(`/api/cases/${caseId}/parts?id=${partId}`, { method: "DELETE" });
+      await refreshCase();
+    });
   };
 
   const addLabor = async (name: string, hours: number, rate_cents: number) => {
     if (!name.trim() || hours < 0 || rate_cents < 0) return;
-    setLoading(true);
-    try {
-      await fetch(`/api/cases/${caseId}/labor`, {
+    await performAction(async () => {
+      await requestJson(`/api/cases/${caseId}/labor`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ name: name.trim(), hours, rate_cents }),
@@ -211,9 +227,7 @@ export function CaseDetail({ caseData }: { caseData: CaseData }) {
       setNewLaborName("");
       setNewLaborHours("");
       setNewLaborRate("");
-    } finally {
-      setLoading(false);
-    }
+    });
   };
 
   const updateLabor = async (
@@ -222,27 +236,33 @@ export function CaseDetail({ caseData }: { caseData: CaseData }) {
     hours: number,
     rate_cents: number
   ) => {
-    await fetch(`/api/cases/${caseId}/labor`, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ id: laborId, name, hours, rate_cents }),
+    await performAction(async () => {
+      await requestJson(`/api/cases/${caseId}/labor`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: laborId, name, hours, rate_cents }),
+      });
+      await refreshCase();
     });
-    await refreshCase();
   };
 
   const deleteLabor = async (laborId: string) => {
-    await fetch(`/api/cases/${caseId}/labor?id=${laborId}`, { method: "DELETE" });
-    await refreshCase();
+    await performAction(async () => {
+      await requestJson(`/api/cases/${caseId}/labor?id=${laborId}`, { method: "DELETE" });
+      await refreshCase();
+    });
   };
 
   const changeStatus = async (to_status: CaseStatus) => {
-    await fetch(`/api/cases/${caseId}/status`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ to_status, note: statusNote || undefined }),
+    await performAction(async () => {
+      await requestJson(`/api/cases/${caseId}/status`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ to_status, note: statusNote || undefined }),
+      });
+      await refreshCase();
+      setStatusNote("");
     });
-    await refreshCase();
-    setStatusNote("");
   };
 
   const downloadPdf = async () => {
@@ -250,7 +270,7 @@ export function CaseDetail({ caseData }: { caseData: CaseData }) {
       const res = await fetch(`/api/cases/${caseId}/pdf`);
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
-        alert(err?.error ?? "生成 PDF 失败");
+        setActionError(apiErrorMessage(err, "生成 PDF 失败"));
         return;
       }
       const usedCustomFont = res.headers.get("X-PDF-Font-Used");
@@ -270,7 +290,7 @@ export function CaseDetail({ caseData }: { caseData: CaseData }) {
       document.body.removeChild(a);
       setTimeout(() => URL.revokeObjectURL(url), 60000);
     } catch (e) {
-      alert("生成或下载 PDF 时出错");
+      setActionError("生成或下载 PDF 时出错");
     }
   };
 
@@ -281,41 +301,39 @@ export function CaseDetail({ caseData }: { caseData: CaseData }) {
   const canProgressToCancel = status === "IN_PROGRESS";
   const isFinal = status === "CANCELED" || status === "COMPLETED";
   /** 仅「进行中」时可编辑维修项目、配件、人工；已提交未开始做单时仅可查看 */
-  const canEditDetails = status === "IN_PROGRESS";
+  const canEditDetails = canEditCaseDetails(status);
   const statusLabel = (s: CaseStatus) =>
     ({ SUBMITTED: "已提交", IN_PROGRESS: "进行中", CANCELED: "已取消", COMPLETED: "已完成" })[s] ?? s;
+  const statusClass =
+    ({
+      SUBMITTED: "bg-sky-50 text-sky-700 ring-sky-600/20",
+      IN_PROGRESS: "bg-amber-50 text-amber-700 ring-amber-600/20",
+      COMPLETED: "bg-emerald-50 text-emerald-700 ring-emerald-600/20",
+      CANCELED: "bg-slate-100 text-slate-600 ring-slate-500/20",
+    } as const)[status];
 
   return (
-    <div className="space-y-8 pb-8">
-      <Card className="shadow-sm">
-        <CardHeader className="pb-2 sm:p-6 sm:pb-2">
-          <CardTitle className="text-lg">车辆与司机</CardTitle>
+    <div className="space-y-6 pb-8 sm:space-y-8">
+      <Card className="overflow-hidden rounded-2xl border-border/80 shadow-sm">
+        <CardHeader className="border-b bg-muted/30 p-5 sm:p-6">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <CardTitle className="text-lg">车辆与司机</CardTitle>
+            <span className={`rounded-full px-3 py-1 text-xs font-semibold ring-1 ring-inset ${statusClass}`}>
+              {statusLabel(status)}
+            </span>
+          </div>
         </CardHeader>
-        <CardContent className="text-sm space-y-2 sm:p-6 sm:pt-0">
-          <p className="flex flex-wrap gap-x-2 gap-y-0.5">
-            <span>车牌：{caseState.plate ?? "-"}</span>
-            <span className="text-muted-foreground hidden sm:inline">|</span>
-            <span>车架号：{caseState.vin ?? "-"}</span>
-            <span className="text-muted-foreground hidden sm:inline">|</span>
-            <span>车号：{caseState.unit_number ?? "-"}</span>
-          </p>
-          <p className="flex flex-wrap gap-x-2 gap-y-0.5">
-            <span>司机：{caseState.customer_name ?? "-"}</span>
-            {caseState.customer_phone && (
-              <>
-                <span className="text-muted-foreground hidden sm:inline">|</span>
-                <span>{caseState.customer_phone}</span>
-              </>
-            )}
-          </p>
-          <p className="flex flex-wrap gap-x-2 gap-y-0.5">
-            <span>状态：<span className="font-medium">{statusLabel(caseState.status)}</span></span>
-            <span className="text-muted-foreground hidden sm:inline">|</span>
-            <span>总价：{formatCents(caseState.grand_total_cents)}</span>
-          </p>
+        <CardContent className="grid gap-5 p-5 text-sm sm:grid-cols-2 sm:p-6 lg:grid-cols-4">
+          <div><p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">车牌</p><p className="mt-1 font-semibold">{caseState.plate ?? "-"}</p></div>
+          <div><p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">车架号</p><p className="mt-1 break-all font-medium">{caseState.vin ?? "-"}</p></div>
+          <div><p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">车号</p><p className="mt-1 font-medium">{caseState.unit_number ?? "-"}</p></div>
+          <div><p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">当前总价</p><p className="mt-1 text-lg font-bold tabular-nums text-primary">{formatCents(caseState.grand_total_cents)}</p></div>
+          <div><p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">司机</p><p className="mt-1 font-medium">{caseState.customer_name ?? "-"}</p></div>
+          <div><p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">联系电话</p><p className="mt-1 font-medium">{caseState.customer_phone ?? "-"}</p></div>
         </CardContent>
       </Card>
 
+      <div className="rounded-2xl border border-border/80 bg-card p-3 shadow-sm sm:p-4">
       <div className="flex flex-wrap gap-2">
         {canSubmitToProgress && (
           <Button onClick={() => changeStatus("IN_PROGRESS")} disabled={loading} className="min-h-[44px] sm:min-h-[40px] flex-1 sm:flex-none">
@@ -341,8 +359,13 @@ export function CaseDetail({ caseData }: { caseData: CaseData }) {
           生成 PDF
         </Button>
       </div>
+      {actionError && (
+        <div role="alert" className="rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive">
+          {actionError}
+        </div>
+      )}
       {!isFinal && (
-        <div className="flex gap-2 items-center">
+        <div className="mt-3 flex items-center gap-2 border-t pt-3">
           <Input
             placeholder="状态变更备注 (可选)"
             value={statusNote}
@@ -351,8 +374,9 @@ export function CaseDetail({ caseData }: { caseData: CaseData }) {
           />
         </div>
       )}
+      </div>
 
-      <Card className="shadow-sm">
+      <Card className="rounded-2xl border-border/80 shadow-sm">
         <CardHeader className="pb-2 sm:p-6 sm:pb-2">
           <CardTitle className="text-lg">状态历史</CardTitle>
         </CardHeader>
@@ -449,7 +473,7 @@ export function CaseDetail({ caseData }: { caseData: CaseData }) {
               />
             </div>
             <div className="grid gap-1 w-full sm:w-auto">
-              <label className="text-sm font-medium text-muted-foreground">单价（元）</label>
+              <label className="text-sm font-medium text-muted-foreground">单价（USD）</label>
               <Input
                 type="number"
                 step={0.01}
@@ -489,7 +513,7 @@ export function CaseDetail({ caseData }: { caseData: CaseData }) {
               <SelectContent>
                 {history?.part_templates?.map((t) => (
                   <SelectItem key={t.name} value={t.name}>
-                    {t.name}（{(t.last_unit_price_cents / 100).toFixed(2)} 元）
+                    {t.name}（{formatCents(t.last_unit_price_cents)}）
                   </SelectItem>
                 ))}
               </SelectContent>
@@ -510,15 +534,22 @@ export function CaseDetail({ caseData }: { caseData: CaseData }) {
             </Button>
           </div>
           )}
-          <div className="rounded-lg border border-border overflow-x-auto -mx-1 px-1 sm:mx-0 sm:px-0">
-            <table className="w-full text-sm min-w-[480px]">
+          <div className="-mx-1 overflow-x-auto rounded-lg border border-border px-1 sm:mx-0 sm:px-0">
+            <table className="w-full min-w-[680px] table-fixed text-sm">
+              <colgroup>
+                <col className="w-[34%]" />
+                <col className="w-[22%]" />
+                <col className="w-[14%]" />
+                <col className="w-[20%]" />
+                {canEditDetails && <col className="w-[10%]" />}
+              </colgroup>
               <thead>
                 <tr className="border-b bg-muted/50">
                   <th className="p-3 text-left font-medium">名称</th>
-                  <th className="p-3 text-right font-medium">单价（元）</th>
+                  <th className="p-3 text-right font-medium">单价（USD）</th>
                   <th className="p-3 text-right font-medium">数量</th>
                   <th className="p-3 text-right font-medium">小计</th>
-                  {canEditDetails && <th className="w-16"></th>}
+                  {canEditDetails && <th className="p-3" aria-label="操作"></th>}
                 </tr>
               </thead>
               <tbody>
@@ -550,11 +581,11 @@ export function CaseDetail({ caseData }: { caseData: CaseData }) {
               />
             </div>
             <div className="grid gap-1 w-full sm:w-auto">
-              <label className="text-sm font-medium text-muted-foreground">费率（元/时）</label>
+              <label className="text-sm font-medium text-muted-foreground">费率（USD/小时）</label>
               <Input
                 type="number"
                 step={0.01}
-                placeholder="费率（元/时）"
+                placeholder="费率（USD/小时）"
                 value={newLaborRate}
                 onChange={(e) => setNewLaborRate(e.target.value)}
                 className="w-full sm:w-[100px] min-h-[44px] sm:min-h-[40px]"
@@ -590,7 +621,7 @@ export function CaseDetail({ caseData }: { caseData: CaseData }) {
                 <SelectContent>
                   {history?.labor_templates?.map((t) => (
                     <SelectItem key={t.name} value={t.name}>
-                      {t.name}（{(t.last_rate_cents / 100).toFixed(2)} 元/时）
+                      {t.name}（{formatCents(t.last_rate_cents)}/小时）
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -611,15 +642,22 @@ export function CaseDetail({ caseData }: { caseData: CaseData }) {
             </Button>
           </div>
           )}
-          <div className="rounded-lg border border-border overflow-x-auto -mx-1 px-1 sm:mx-0 sm:px-0">
-            <table className="w-full text-sm min-w-[480px]">
+          <div className="-mx-1 overflow-x-auto rounded-lg border border-border px-1 sm:mx-0 sm:px-0">
+            <table className="w-full min-w-[680px] table-fixed text-sm">
+              <colgroup>
+                <col className="w-[34%]" />
+                <col className="w-[22%]" />
+                <col className="w-[14%]" />
+                <col className="w-[20%]" />
+                {canEditDetails && <col className="w-[10%]" />}
+              </colgroup>
               <thead>
                 <tr className="border-b bg-muted/50">
                   <th className="p-3 text-left font-medium">名称</th>
-                  <th className="p-3 text-right font-medium">费率（元/时）</th>
+                  <th className="p-3 text-right font-medium">费率（USD/小时）</th>
                   <th className="p-3 text-right font-medium">小时</th>
                   <th className="p-3 text-right font-medium">小计</th>
-                  {canEditDetails && <th className="w-16"></th>}
+                  {canEditDetails && <th className="p-3" aria-label="操作"></th>}
                 </tr>
               </thead>
               <tbody>
@@ -722,7 +760,7 @@ function PartRow({
     return (
       <tr className="border-b">
         <td className="p-2 sm:p-3">{part.name}</td>
-        <td className="p-2 sm:p-3 text-right">{(part.unit_price_cents / 100).toFixed(2)}</td>
+        <td className="p-2 sm:p-3 text-right">{formatCents(part.unit_price_cents)}</td>
         <td className="p-2 sm:p-3 text-right">{part.qty}</td>
         <td className="p-2 sm:p-3 text-right">{formatCents(part.line_total_cents)}</td>
       </tr>
@@ -730,7 +768,7 @@ function PartRow({
   }
   return (
     <tr className="border-b hover:bg-muted/20">
-      <td className="p-2 sm:p-3">
+      <td className="p-2 text-right sm:p-3">
         <Input
           value={name}
           onChange={(e) => setName(e.target.value)}
@@ -745,21 +783,21 @@ function PartRow({
           value={price}
           onChange={(e) => setPrice(e.target.value)}
           onBlur={handleBlur}
-          className="min-h-[40px] sm:min-h-[32px] w-20 sm:w-24 text-right"
+          className="ml-auto min-h-[40px] w-20 text-right sm:min-h-[32px] sm:w-24"
         />
       </td>
-      <td className="p-2 sm:p-3">
+      <td className="p-2 text-right sm:p-3">
         <Input
           type="number"
           min={1}
           value={qty}
           onChange={(e) => setQty(e.target.value)}
           onBlur={handleBlur}
-          className="min-h-[40px] sm:min-h-[32px] w-16 sm:w-20 text-right"
+          className="ml-auto min-h-[40px] w-16 text-right sm:min-h-[32px] sm:w-20"
         />
       </td>
       <td className="p-2 sm:p-3 text-right align-middle">{formatCents(part.line_total_cents)}</td>
-      <td className="p-2 sm:p-3">
+      <td className="p-2 text-right sm:p-3">
         <Button variant="destructive" size="sm" onClick={onDelete} className="min-h-[40px] sm:min-h-[32px]">
           删除
         </Button>
@@ -796,7 +834,7 @@ function LaborRow({
     return (
       <tr className="border-b">
         <td className="p-2 sm:p-3">{labor.name}</td>
-        <td className="p-2 sm:p-3 text-right">{(labor.rate_cents / 100).toFixed(2)}</td>
+        <td className="p-2 sm:p-3 text-right">{formatCents(labor.rate_cents)}</td>
         <td className="p-2 sm:p-3 text-right">{labor.hours}</td>
         <td className="p-2 sm:p-3 text-right">{formatCents(labor.line_total_cents)}</td>
       </tr>
@@ -804,7 +842,7 @@ function LaborRow({
   }
   return (
     <tr className="border-b hover:bg-muted/20">
-      <td className="p-2 sm:p-3">
+      <td className="p-2 text-right sm:p-3">
         <Input
           value={name}
           onChange={(e) => setName(e.target.value)}
@@ -819,21 +857,21 @@ function LaborRow({
           value={rate}
           onChange={(e) => setRate(e.target.value)}
           onBlur={handleBlur}
-          className="min-h-[40px] sm:min-h-[32px] w-20 sm:w-24 text-right"
+          className="ml-auto min-h-[40px] w-20 text-right sm:min-h-[32px] sm:w-24"
         />
       </td>
-      <td className="p-2 sm:p-3">
+      <td className="p-2 text-right sm:p-3">
         <Input
           type="number"
           step={0.25}
           value={hours}
           onChange={(e) => setHours(e.target.value)}
           onBlur={handleBlur}
-          className="min-h-[40px] sm:min-h-[32px] w-16 sm:w-20 text-right"
+          className="ml-auto min-h-[40px] w-16 text-right sm:min-h-[32px] sm:w-20"
         />
       </td>
       <td className="p-2 sm:p-3 text-right align-middle">{formatCents(labor.line_total_cents)}</td>
-      <td className="p-2 sm:p-3">
+      <td className="p-2 text-right sm:p-3">
         <Button variant="destructive" size="sm" onClick={onDelete} className="min-h-[40px] sm:min-h-[32px]">
           删除
         </Button>
