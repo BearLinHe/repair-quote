@@ -6,6 +6,7 @@ import { generateCasePdf } from "../src/lib/pdf";
 test("creates additional pages for long invoices", async () => {
   const { pdfBytes } = await generateCasePdf({
     companyName: "YaoYuan Inc.",
+    invoiceNumber: "2026071712345678",
     date: new Date("2026-07-17T12:00:00Z"),
     plate: "TEST-001",
     vin: null,

@@ -27,6 +27,7 @@ type LaborRow = {
 
 type CaseData = {
   id: string;
+  invoice_number: string;
   plate: string | null;
   vin: string | null;
   unit_number: string | null;
@@ -324,6 +325,7 @@ export function CaseDetail({ caseData }: { caseData: CaseData }) {
           </div>
         </CardHeader>
         <CardContent className="grid gap-5 p-5 text-sm sm:grid-cols-2 sm:p-6 lg:grid-cols-4">
+          <div><p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Invoice Number</p><p className="mt-1 font-semibold tabular-nums">{caseState.invoice_number}</p></div>
           <div><p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">车牌</p><p className="mt-1 font-semibold">{caseState.plate ?? "-"}</p></div>
           <div><p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">车架号</p><p className="mt-1 break-all font-medium">{caseState.vin ?? "-"}</p></div>
           <div><p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">车号</p><p className="mt-1 font-medium">{caseState.unit_number ?? "-"}</p></div>

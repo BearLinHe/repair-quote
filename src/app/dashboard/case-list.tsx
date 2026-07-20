@@ -8,6 +8,7 @@ import { Inbox, RefreshCw, Search } from "lucide-react";
 
 type CaseRow = {
   id: string;
+  invoice_number: string;
   plate: string | null;
   vin: string | null;
   unit_number: string | null;
@@ -74,7 +75,7 @@ export function CaseList() {
         <Search className="pointer-events-none absolute left-3.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
         <input
           type="search"
-          placeholder="搜索车牌 / 车架号 / 车号"
+          placeholder="搜索 Invoice Number / 车牌 / 车架号 / 车号"
           className="min-h-12 w-full rounded-xl border border-input bg-card py-2.5 pl-10 pr-4 text-sm shadow-sm outline-none transition-shadow placeholder:text-muted-foreground focus:ring-2 focus:ring-ring/30"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
@@ -126,6 +127,7 @@ export function CaseList() {
                   </span>
                 </div>
                 <div className="flex flex-wrap gap-x-3 gap-y-1 text-sm text-muted-foreground">
+                  <span className="w-full font-mono text-xs text-muted-foreground">Invoice #{c.invoice_number}</span>
                   <span className="font-medium text-foreground">{formatCents(c.grand_total_cents)}</span>
                   <span>{new Date(c.created_at).toLocaleDateString("zh-CN")}</span>
                   <span className="ml-auto font-medium text-primary">查看详情 →</span>
@@ -136,9 +138,10 @@ export function CaseList() {
           {/* 桌面端：表格 */}
           <div className="hidden overflow-hidden rounded-2xl border border-border/80 bg-card shadow-sm sm:block">
             <div className="overflow-x-auto">
-              <table className="w-full min-w-[780px] text-sm">
+              <table className="w-full min-w-[940px] text-sm">
                 <thead>
                   <tr className="border-b bg-muted/60 text-xs uppercase tracking-wide text-muted-foreground">
+                    <th className="px-4 py-3.5 text-left font-semibold">Invoice Number</th>
                     <th className="px-4 py-3.5 text-left font-semibold">车牌</th>
                     <th className="px-4 py-3.5 text-left font-semibold">车架号</th>
                     <th className="px-4 py-3.5 text-left font-semibold">车号</th>
@@ -151,6 +154,7 @@ export function CaseList() {
                 <tbody>
                   {cases.map((c) => (
                     <tr key={c.id} className="border-b last:border-0 hover:bg-muted/30 transition-colors">
+                      <td className="px-4 py-4 font-mono text-xs tabular-nums">{c.invoice_number}</td>
                       <td className="px-4 py-4 font-medium">{c.plate ?? "-"}</td>
                       <td className="max-w-52 truncate px-4 py-4 text-muted-foreground">{c.vin ?? "-"}</td>
                       <td className="px-4 py-4">{c.unit_number ?? "-"}</td>

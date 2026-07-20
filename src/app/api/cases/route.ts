@@ -3,6 +3,7 @@ import { z } from "zod";
 import { prisma } from "@/lib/db";
 import { requireAuth, unauthorizedResponse } from "@/lib/auth";
 import { apiError } from "@/lib/api-error";
+import { generateInvoiceNumber } from "@/lib/invoice-number";
 
 const querySchema = z.object({ query: z.string().optional() });
 
@@ -19,6 +20,7 @@ export async function GET(req: NextRequest) {
       | { plate: { contains: string; mode: "insensitive" } }
       | { vin: { contains: string; mode: "insensitive" } }
       | { unit_number: { contains: string; mode: "insensitive" } }
+      | { invoice_number: { contains: string; mode: "insensitive" } }
     >;
   } = {
     clerk_user_id: userId,
@@ -29,6 +31,7 @@ export async function GET(req: NextRequest) {
       { plate: { contains: q, mode: "insensitive" } },
       { vin: { contains: q, mode: "insensitive" } },
       { unit_number: { contains: q, mode: "insensitive" } },
+      { invoice_number: { contains: q, mode: "insensitive" } },
     ];
   }
 
@@ -37,6 +40,7 @@ export async function GET(req: NextRequest) {
     orderBy: { created_at: "desc" },
     select: {
       id: true,
+      invoice_number: true,
       plate: true,
       vin: true,
       unit_number: true,
@@ -74,8 +78,19 @@ export async function POST(req: NextRequest) {
   const data = parsed.data;
 
   const created = await prisma.$transaction(async (tx) => {
+    let invoiceNumber = generateInvoiceNumber();
+    for (let attempt = 0; attempt < 10; attempt += 1) {
+      const existing = await tx.case.findUnique({
+        where: { invoice_number: invoiceNumber },
+        select: { id: true },
+      });
+      if (!existing) break;
+      invoiceNumber = generateInvoiceNumber();
+    }
+
     const c = await tx.case.create({
       data: {
+        invoice_number: invoiceNumber,
         clerk_user_id: userId,
         plate: data.plate?.trim() || null,
         vin: data.vin?.trim() || null,

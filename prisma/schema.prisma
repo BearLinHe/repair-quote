@@ -17,6 +17,7 @@ enum CaseStatus {
 
 model Case {
   id                   String     @id @default(uuid())
+  invoice_number       String     @unique
   created_at           DateTime   @default(now())
   updated_at           DateTime   @updatedAt
   clerk_user_id        String

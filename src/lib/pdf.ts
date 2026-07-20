@@ -1,4 +1,4 @@
-import { PDFDocument, StandardFonts, rgb, type PDFFont } from "pdf-lib";
+import { PDFDocument, StandardFonts, rgb, type PDFFont, type RGB } from "pdf-lib";
 import fontkit from "@pdf-lib/fontkit";
 
 /** 无中文字体时：Helvetica 仅支持 ASCII，非 ASCII 显示为 ?，不翻译 */
@@ -56,6 +56,7 @@ function wrapText(text: string, maxWidth: number, measure: (value: string) => nu
 
 export type CasePdfInput = {
   companyName: string;
+  invoiceNumber: string;
   date: Date;
   plate: string | null;
   vin: string | null;
@@ -121,6 +122,19 @@ export async function generateCasePdf(input: CasePdfInput): Promise<GenerateCase
   const lineHeight = 20;
   const smallLine = 14;
   const contentBottom = 110;
+  const colors = {
+    ink: rgb(18 / 255, 18 / 255, 18 / 255),
+    muted: rgb(95 / 255, 90 / 255, 82 / 255),
+    onDark: rgb(244 / 255, 239 / 255, 222 / 255),
+    brand: rgb(183 / 255, 143 / 255, 39 / 255),
+    brandDark: rgb(120 / 255, 88 / 255, 18 / 255),
+    brandSoft: rgb(251 / 255, 247 / 255, 235 / 255),
+    brandBorder: rgb(215 / 255, 185 / 255, 93 / 255),
+    submitted: rgb(120 / 255, 88 / 255, 18 / 255),
+    inProgress: rgb(183 / 255, 143 / 255, 39 / 255),
+    completed: rgb(18 / 255, 18 / 255, 18 / 255),
+    canceled: rgb(95 / 255, 90 / 255, 82 / 255),
+  };
 
   const fontForChar = (char: string, bold: boolean) => {
     const needsCustomFont = useCustomFont && /[^\x20-\x7E]/.test(char);
@@ -147,7 +161,7 @@ export async function generateCasePdf(input: CasePdfInput): Promise<GenerateCase
 
   const drawText = (
     text: string,
-    options: { x: number; y: number; size: number; bold?: boolean },
+    options: { x: number; y: number; size: number; bold?: boolean; color?: RGB },
   ) => {
     let x = options.x;
     for (const run of textRuns(text, options.bold)) {
@@ -156,7 +170,7 @@ export async function generateCasePdf(input: CasePdfInput): Promise<GenerateCase
         y: options.y,
         size: options.size,
         font: run.font,
-        color: rgb(0, 0, 0),
+        color: options.color ?? colors.ink,
       });
       x += run.font.widthOfTextAtSize(run.text, options.size);
     }
@@ -165,17 +179,29 @@ export async function generateCasePdf(input: CasePdfInput): Promise<GenerateCase
   const addContinuationPage = () => {
     page = doc.addPage([612, 792]);
     y = height - 60;
+    page.drawRectangle({
+      x: 36,
+      y: y - 12,
+      width: width - 72,
+      height: 34,
+      color: colors.ink,
+      borderColor: colors.brandBorder,
+      borderWidth: 0.8,
+    });
+    page.drawRectangle({ x: 36, y: y - 12, width: 5, height: 34, color: colors.brand });
     drawText(textForPdf(input.companyName), {
       x: left,
       y,
       size: 14,
       bold: true,
+      color: colors.brand,
     });
     drawText("Invoice — Continued", {
       x: width - 170,
       y,
       size: 12,
       bold: true,
+      color: colors.brand,
     });
     y -= 28;
   };
@@ -184,15 +210,25 @@ export async function generateCasePdf(input: CasePdfInput): Promise<GenerateCase
     if (y - requiredHeight < contentBottom) addContinuationPage();
   };
 
-  const draw = (text: string, opts?: { bold?: boolean; size?: number }) => {
+  const draw = (text: string, opts?: { bold?: boolean; size?: number; color?: RGB }) => {
     ensureSpace(lineHeight);
     const size = opts?.size ?? 12;
-    drawText(text, { x: left, y, size, bold: opts?.bold });
+    drawText(text, { x: left, y, size, bold: opts?.bold, color: opts?.color });
     y -= lineHeight;
   };
 
   // 标题区：公司名（左上）+ Invoice（右上，与公司名同一基线）；其下为地址与电话
-  draw(textForPdf(input.companyName), { bold: true, size: 20 });
+  page.drawRectangle({
+    x: 36,
+    y: height - 152,
+    width: width - 72,
+    height: 108,
+    color: colors.ink,
+    borderColor: colors.brandBorder,
+    borderWidth: 0.8,
+  });
+  page.drawRectangle({ x: 36, y: height - 152, width: 6, height: 108, color: colors.brand });
+  draw(textForPdf(input.companyName), { bold: true, size: 20, color: colors.brand });
   const invoiceTitle = "Invoice";
   const invoiceSize = 16;
   const invoiceWidth = measureText(invoiceTitle, invoiceSize, true);
@@ -202,9 +238,11 @@ export async function generateCasePdf(input: CasePdfInput): Promise<GenerateCase
     y: companyBaselineY,
     size: invoiceSize,
     bold: true,
+    color: colors.brand,
   });
-  draw("25503 Industrial Blvd, Hayward, CA 94545", { size: 11 });
-  draw("Tel: 4159679959", { size: 11 });
+  draw("25503 Industrial Blvd, Hayward, CA 94545", { size: 11, color: colors.onDark });
+  draw("Tel: 4159679959", { size: 11, color: colors.onDark });
+  draw(`Invoice #: ${input.invoiceNumber}`, { size: 11, color: colors.brand, bold: true });
   y -= 8;
   const d = input.date;
   const dateStr = `${String(d.getMonth() + 1).padStart(2, "0")}/${String(d.getDate()).padStart(
@@ -229,11 +267,28 @@ export async function generateCasePdf(input: CasePdfInput): Promise<GenerateCase
     draw(driverParts.join(" | "));
     y -= 8;
   }
-  draw(`Status: ${textForPdf(input.status)} | Grand Total: ${formatCents(input.grand_total_cents)}`);
+  const statusColor =
+    ({
+      Submitted: colors.submitted,
+      "In Progress": colors.inProgress,
+      Completed: colors.completed,
+      Canceled: colors.canceled,
+    } as Record<string, RGB>)[input.status] ?? colors.brand;
+  ensureSpace(lineHeight);
+  const statusText = `Status: ${textForPdf(input.status)}`;
+  drawText(statusText, { x: left, y, size: 12, bold: true, color: statusColor });
+  drawText(` | Grand Total: ${formatCents(input.grand_total_cents)}`, {
+    x: left + measureText(statusText, 12, true),
+    y,
+    size: 12,
+    bold: true,
+    color: colors.ink,
+  });
+  y -= lineHeight;
   y -= 12;
 
   if (input.repairItems.length) {
-    draw("Repair Items:", { bold: true, size: 13 });
+    draw("Repair Items:", { bold: true, size: 13, color: colors.brandDark });
     input.repairItems.forEach((name) => {
       ensureSpace(smallLine);
       drawText("• " + textForPdf(name), { x: left + 8, y, size: 11 });
@@ -244,7 +299,8 @@ export async function generateCasePdf(input: CasePdfInput): Promise<GenerateCase
 
   if (input.parts.length) {
     const drawPartsHeader = () => {
-      draw("Parts", { bold: true, size: 13 });
+      draw("Parts", { bold: true, size: 13, color: colors.brandDark });
+      page.drawRectangle({ x: left - 4, y: y - 4, width: 470, height: 17, color: colors.brandSoft });
       drawText("Name", { x: left, y, size: 11, bold: true });
       drawText("Qty", { x: left + 200, y, size: 11, bold: true });
       drawText("Unit Price", { x: left + 260, y, size: 11, bold: true });
@@ -276,7 +332,8 @@ export async function generateCasePdf(input: CasePdfInput): Promise<GenerateCase
 
   if (input.labor.length) {
     const drawLaborHeader = () => {
-      draw("Labor", { bold: true, size: 13 });
+      draw("Labor", { bold: true, size: 13, color: colors.brandDark });
+      page.drawRectangle({ x: left - 4, y: y - 4, width: 470, height: 17, color: colors.brandSoft });
       drawText("Name", { x: left, y, size: 11, bold: true });
       drawText("Hours", { x: left + 200, y, size: 11, bold: true });
       drawText("Rate", { x: left + 280, y, size: 11, bold: true });
@@ -307,7 +364,20 @@ export async function generateCasePdf(input: CasePdfInput): Promise<GenerateCase
   if (input.apply_tax !== false) {
     draw(`Tax: ${formatCents(input.tax_cents)}`);
   }
-  draw(`Grand Total: ${formatCents(input.grand_total_cents)}`, { bold: true });
+  page.drawRectangle({
+    x: left - 6,
+    y: y - 6,
+    width: 470,
+    height: 25,
+    color: colors.brandSoft,
+    borderColor: colors.brandBorder,
+    borderWidth: 0.8,
+  });
+  draw(`Grand Total: ${formatCents(input.grand_total_cents)}`, {
+    bold: true,
+    size: 13,
+    color: colors.brandDark,
+  });
 
   // 签名区域固定在页面下部，避免跟上面内容太接近
   y = 80;
@@ -315,12 +385,14 @@ export async function generateCasePdf(input: CasePdfInput): Promise<GenerateCase
     x: left,
     y,
     size: 12,
+    color: colors.muted,
   });
   y -= 24;
   drawText("Date: _________________________________________", {
     x: left,
     y,
     size: 12,
+    color: colors.muted,
   });
 
   const pdfBytes = await doc.save();

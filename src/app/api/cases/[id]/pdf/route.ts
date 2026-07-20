@@ -54,6 +54,7 @@ export async function GET(
 
   const baseInput = {
     companyName,
+    invoiceNumber: c.invoice_number,
     date: new Date(),
     plate: c.plate,
     vin: c.vin,
@@ -108,7 +109,7 @@ export async function GET(
     status: 200,
     headers: {
       "Content-Type": "application/pdf",
-      "Content-Disposition": `attachment; filename="quote-${id.slice(0, 8)}.pdf"`,
+      "Content-Disposition": `attachment; filename="invoice-${c.invoice_number}.pdf"`,
       "X-PDF-Font-Used": result.usedCustomFont ? "true" : "false",
     },
   });
