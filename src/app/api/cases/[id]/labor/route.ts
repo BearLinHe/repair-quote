@@ -6,6 +6,7 @@ import { requireAuth, unauthorizedResponse } from "@/lib/auth";
 import { recalcTotals } from "@/lib/recalc";
 import { apiError } from "@/lib/api-error";
 import { canEditCaseDetails } from "@/lib/case-rules";
+import { auditData, getAuditActor } from "@/lib/audit";
 
 async function checkCase(id: string, userId: string) {
   const c = await prisma.case.findUnique({ where: { id }, select: { clerk_user_id: true, status: true } });
@@ -51,6 +52,7 @@ export async function POST(
   if (!parsed.success) return apiError("VALIDATION_ERROR", "人工信息格式不正确", 400, parsed.error.flatten());
   const { name, hours, rate_cents } = parsed.data;
   const line_total_cents = laborLineTotal(hours, rate_cents);
+  const actor = await getAuditActor(userId);
   const labor = await prisma.$transaction(async (tx) => {
     const created = await tx.caseLabor.create({
       data: {
@@ -62,6 +64,7 @@ export async function POST(
       },
     });
     await recalcTotals(id, tx);
+    await tx.auditLog.create({ data: auditData(actor, { action: "CASE_LABOR_ADDED", entityType: "CASE", entityId: id, entityLabel: created.name, details: { hours, rate_cents } }) });
     return created;
   });
   return Response.json({
@@ -96,6 +99,7 @@ export async function PUT(
   const hours = parsed.data.hours !== undefined ? parsed.data.hours : Number(existing.hours);
   const rate_cents = parsed.data.rate_cents ?? existing.rate_cents;
   const line_total_cents = laborLineTotal(hours, rate_cents);
+  const actor = await getAuditActor(userId);
   const labor = await prisma.$transaction(async (tx) => {
     const updated = await tx.caseLabor.update({
       where: { id: laborId },
@@ -107,6 +111,7 @@ export async function PUT(
       },
     });
     await recalcTotals(id, tx);
+    await tx.auditLog.create({ data: auditData(actor, { action: "CASE_LABOR_UPDATED", entityType: "CASE", entityId: id, entityLabel: updated.name, details: { hours, rate_cents } }) });
     return updated;
   });
   return Response.json({
@@ -131,9 +136,11 @@ export async function DELETE(
     where: { id: laborId, case_id: id },
   });
   if (!existing) return apiError("LABOR_NOT_FOUND", "人工记录不存在", 404);
+  const actor = await getAuditActor(userId);
   await prisma.$transaction(async (tx) => {
     await tx.caseLabor.delete({ where: { id: laborId } });
     await recalcTotals(id, tx);
+    await tx.auditLog.create({ data: auditData(actor, { action: "CASE_LABOR_DELETED", entityType: "CASE", entityId: id, entityLabel: existing.name, details: { hours: Number(existing.hours) } }) });
   });
   return Response.json({ ok: true });
 }

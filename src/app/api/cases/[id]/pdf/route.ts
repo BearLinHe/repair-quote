@@ -5,6 +5,11 @@ import { prisma } from "@/lib/db";
 import { requireAuth, unauthorizedResponse } from "@/lib/auth";
 import { apiError } from "@/lib/api-error";
 import { generateCasePdf } from "@/lib/pdf";
+import {
+  bilingualPdfText,
+  PdfTranslationError,
+  translateChineseForPdf,
+} from "@/lib/pdf-translation";
 
 /** PDF 中文字体：仅使用 NotoSerifSC-Medium.ttf */
 const PDF_FONT_FILE = "NotoSerifSC-Medium.ttf";
@@ -52,26 +57,59 @@ export async function GET(
   }
   const statusTextEn = { SUBMITTED: "Submitted", IN_PROGRESS: "In Progress", CANCELED: "Canceled", COMPLETED: "Completed" }[c.status] ?? c.status;
 
+  let translations: Map<string, string>;
+  try {
+    translations = await translateChineseForPdf([
+      companyName,
+      c.bill_to_company,
+      c.bill_to_address,
+      c.bill_to_contact,
+      c.plate,
+      c.vin,
+      c.unit_number,
+      c.customer_name,
+      c.customer_phone,
+      ...c.repair_items.map((item) => item.name),
+      ...c.parts.map((part) => part.name),
+      ...c.labor.map((labor) => labor.name),
+    ]);
+  } catch (error) {
+    if (error instanceof PdfTranslationError) {
+      const status = error.code === "NOT_CONFIGURED" ? 503 : 502;
+      return apiError("PDF_TRANSLATION_FAILED", error.message, status);
+    }
+    return apiError("PDF_TRANSLATION_FAILED", "PDF 中文翻译失败", 502);
+  }
+  const containsTranslatedChinese = translations.size > 0;
+  if (containsTranslatedChinese && !customFontBytes) {
+    return apiError("PDF_FONT_MISSING", "PDF 中文字体未安装，无法生成完整的中英双语文件", 500);
+  }
+  const bilingual = (value: string | null | undefined) =>
+    value ? bilingualPdfText(value, translations) : null;
+
   const baseInput = {
-    companyName,
+    companyName: bilingualPdfText(companyName, translations),
     invoiceNumber: c.invoice_number,
     date: new Date(),
-    plate: c.plate,
-    vin: c.vin,
-    unit_number: c.unit_number,
-    driver_name: c.customer_name,
-    driver_phone: c.customer_phone,
+    billToCompany: bilingual(c.bill_to_company),
+    billToAddress: bilingual(c.bill_to_address),
+    billToContact: bilingual(c.bill_to_contact),
+    plate: bilingual(c.plate),
+    vin: bilingual(c.vin),
+    unit_number: bilingual(c.unit_number),
+    driver_name: bilingual(c.customer_name),
+    driver_phone: bilingual(c.customer_phone),
     apply_cleaning: c.apply_cleaning,
     apply_tax: c.apply_tax,
-    repairItems: c.repair_items.map((i) => i.name),
+    repairItems: c.repair_items.map((i) => bilingualPdfText(i.name, translations)),
     parts: c.parts.map((p) => ({
-      name: p.name,
+      name: bilingualPdfText(p.name, translations),
       qty: p.qty,
       unit_price_cents: p.unit_price_cents,
       line_total_cents: p.line_total_cents,
     })),
     labor: c.labor.map((l) => ({
-      name: l.name,
+      name: bilingualPdfText(l.name, translations),
       hours: Number(l.hours),
       rate_cents: l.rate_cents,
       line_total_cents: l.line_total_cents,
@@ -90,6 +128,10 @@ export async function GET(
       customFontBytes,
     });
   } catch (err) {
+    if (containsTranslatedChinese) {
+      console.error("PDF Chinese font generation failed:", err);
+      return apiError("PDF_FONT_FAILED", "PDF 中文字体加载失败，未生成不完整文件", 500);
+    }
     console.warn("PDF 使用指定字体生成失败，改用系统字体:", err instanceof Error ? err.message : err);
     try {
       result = await generateCasePdf({

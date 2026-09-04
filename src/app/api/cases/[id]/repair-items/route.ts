@@ -4,6 +4,7 @@ import { prisma } from "@/lib/db";
 import { requireAuth, unauthorizedResponse } from "@/lib/auth";
 import { apiError } from "@/lib/api-error";
 import { canEditCaseDetails } from "@/lib/case-rules";
+import { auditData, getAuditActor } from "@/lib/audit";
 
 async function checkCase(id: string, userId: string) {
   const c = await prisma.case.findUnique({ where: { id }, select: { clerk_user_id: true, status: true } });
@@ -36,12 +37,15 @@ export async function POST(
     orderBy: { sort_order: "desc" },
     select: { sort_order: true },
   });
-  const item = await prisma.caseRepairItem.create({
-    data: {
+  const actor = await getAuditActor(userId);
+  const item = await prisma.$transaction(async (tx) => {
+    const created = await tx.caseRepairItem.create({ data: {
       case_id: id,
       name: parsed.data.name.trim(),
       sort_order: parsed.data.sort_order ?? (maxOrder?.sort_order ?? -1) + 1,
-    },
+    } });
+    await tx.auditLog.create({ data: auditData(actor, { action: "CASE_REPAIR_ITEM_ADDED", entityType: "CASE", entityId: id, entityLabel: created.name }) });
+    return created;
   });
   return Response.json(item);
 }
@@ -64,12 +68,14 @@ export async function PUT(
     where: { id: itemId, case_id: id },
   });
   if (!existing) return apiError("REPAIR_ITEM_NOT_FOUND", "维修项目不存在", 404);
-  const item = await prisma.caseRepairItem.update({
-    where: { id: itemId },
-    data: {
+  const actor = await getAuditActor(userId);
+  const item = await prisma.$transaction(async (tx) => {
+    const updated = await tx.caseRepairItem.update({ where: { id: itemId }, data: {
       ...(parsed.data.name !== undefined && { name: parsed.data.name.trim() }),
       ...(parsed.data.sort_order !== undefined && { sort_order: parsed.data.sort_order }),
-    },
+    } });
+    await tx.auditLog.create({ data: auditData(actor, { action: "CASE_REPAIR_ITEM_UPDATED", entityType: "CASE", entityId: id, entityLabel: updated.name }) });
+    return updated;
   });
   return Response.json(item);
 }
@@ -90,6 +96,10 @@ export async function DELETE(
     where: { id: itemId, case_id: id },
   });
   if (!existing) return apiError("REPAIR_ITEM_NOT_FOUND", "维修项目不存在", 404);
-  await prisma.caseRepairItem.delete({ where: { id: itemId } });
+  const actor = await getAuditActor(userId);
+  await prisma.$transaction(async (tx) => {
+    await tx.caseRepairItem.delete({ where: { id: itemId } });
+    await tx.auditLog.create({ data: auditData(actor, { action: "CASE_REPAIR_ITEM_DELETED", entityType: "CASE", entityId: id, entityLabel: existing.name }) });
+  });
   return Response.json({ ok: true });
 }

@@ -4,6 +4,7 @@ import { prisma } from "@/lib/db";
 import { requireAuth, unauthorizedResponse } from "@/lib/auth";
 import { apiError } from "@/lib/api-error";
 import { generateInvoiceNumber } from "@/lib/invoice-number";
+import { auditData, getAuditActor } from "@/lib/audit";
 
 const querySchema = z.object({ query: z.string().optional() });
 
@@ -61,6 +62,9 @@ const createSchema = z
     customer_name: z.string().optional(),
     customer_phone: z.string().optional(),
     customer_email: z.string().optional(),
+    bill_to_company: z.string().trim().min(1, "Bill To 公司名称不能为空").max(200),
+    bill_to_address: z.string().trim().max(500).optional(),
+    bill_to_contact: z.string().trim().max(200).optional(),
     check_in_at: z.string().datetime().optional(),
   })
   .refine((d) => (d.plate?.trim() ?? "") !== "" || (d.vin?.trim() ?? "") !== "" || (d.unit_number?.trim() ?? "") !== "", {
@@ -76,6 +80,7 @@ export async function POST(req: NextRequest) {
     return apiError("VALIDATION_ERROR", "维修单信息格式不正确", 400, parsed.error.flatten());
   }
   const data = parsed.data;
+  const actor = await getAuditActor(userId);
 
   const created = await prisma.$transaction(async (tx) => {
     let invoiceNumber = generateInvoiceNumber();
@@ -98,6 +103,9 @@ export async function POST(req: NextRequest) {
         customer_name: data.customer_name?.trim() || null,
         customer_phone: data.customer_phone?.trim() || null,
         customer_email: data.customer_email?.trim() || null,
+        bill_to_company: data.bill_to_company,
+        bill_to_address: data.bill_to_address || null,
+        bill_to_contact: data.bill_to_contact || null,
         check_in_at: data.check_in_at ? new Date(data.check_in_at) : new Date(),
         status: "SUBMITTED",
       },
@@ -111,6 +119,7 @@ export async function POST(req: NextRequest) {
         note: "Case created",
       },
     });
+    await tx.auditLog.create({ data: auditData(actor, { action: "CASE_CREATED", entityType: "CASE", entityId: c.id, entityLabel: c.invoice_number, details: { plate: c.plate, vin: c.vin, unit_number: c.unit_number, bill_to_company: c.bill_to_company } }) });
     return c;
   });
 

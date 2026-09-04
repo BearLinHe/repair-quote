@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -34,6 +34,9 @@ type CaseData = {
   customer_name: string | null;
   customer_phone: string | null;
   customer_email: string | null;
+  bill_to_company: string | null;
+  bill_to_address: string | null;
+  bill_to_contact: string | null;
   status: CaseStatus;
   parts_subtotal_cents: number;
   labor_subtotal_cents: number;
@@ -42,8 +45,10 @@ type CaseData = {
   apply_tax: boolean;
   tax_cents: number;
   grand_total_cents: number;
+  draft_data: unknown;
+  draft_updated_at: string | null;
   repair_items: Array<{ id: string; name: string; sort_order: number }>;
-  parts: Array<{ id: string; name: string; unit_price_cents: number; qty: number; line_total_cents: number }>;
+  parts: Array<{ id: string; name: string; unit_price_cents: number; qty: number; line_total_cents: number; inventory_item_id: string | null; cost_total_cents: number }>;
   labor: LaborRow[];
   status_logs: Array<{
     id: string;
@@ -55,10 +60,38 @@ type CaseData = {
   }>;
 };
 
+type DraftTab = "items" | "parts" | "labor" | "summary";
+
+type CaseDraft = {
+  active_tab?: DraftTab;
+  repair_item_name?: string;
+  selected_inventory_id?: string;
+  part_price?: string;
+  part_qty?: string;
+  labor_name?: string;
+  labor_hours?: string;
+  labor_rate?: string;
+  status_note?: string;
+};
+
+function normalizeDraft(value: unknown): CaseDraft {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  return value as CaseDraft;
+}
+
 type History = {
   repair_item_names: string[];
-  part_templates: Array<{ name: string; last_unit_price_cents: number }>;
   labor_templates: Array<{ name: string; last_rate_cents: number }>;
+};
+
+type InventoryOption = {
+  id: string;
+  sku: string;
+  name: string;
+  unit: string;
+  available_qty: number;
+  default_sale_price_cents: number;
+  is_active: boolean;
 };
 
 async function requestJson<T>(url: string, init?: RequestInit): Promise<T> {
@@ -86,18 +119,33 @@ function formatStatusLogTime(isoString: string): string {
 }
 
 export function CaseDetail({ caseData }: { caseData: CaseData }) {
+  const initialDraft = normalizeDraft(caseData.draft_data);
   const [caseState, setCaseState] = useState(caseData);
   const [history, setHistory] = useState<History | null>(null);
-  const [newItemName, setNewItemName] = useState("");
-  const [newPartName, setNewPartName] = useState("");
-  const [newPartPrice, setNewPartPrice] = useState("");
-  const [newPartQty, setNewPartQty] = useState("1");
-  const [newLaborName, setNewLaborName] = useState("");
-  const [newLaborHours, setNewLaborHours] = useState("");
-  const [newLaborRate, setNewLaborRate] = useState("");
-  const [statusNote, setStatusNote] = useState("");
+  const [inventory, setInventory] = useState<InventoryOption[]>([]);
+  const [selectedInventoryId, setSelectedInventoryId] = useState(initialDraft.selected_inventory_id ?? "");
+  const [newItemName, setNewItemName] = useState(initialDraft.repair_item_name ?? "");
+  const [newPartPrice, setNewPartPrice] = useState(initialDraft.part_price ?? "");
+  const [newPartQty, setNewPartQty] = useState(initialDraft.part_qty ?? "1");
+  const [newLaborName, setNewLaborName] = useState(initialDraft.labor_name ?? "");
+  const [newLaborHours, setNewLaborHours] = useState(initialDraft.labor_hours ?? "");
+  const [newLaborRate, setNewLaborRate] = useState(initialDraft.labor_rate ?? "");
+  const [statusNote, setStatusNote] = useState(initialDraft.status_note ?? "");
+  const [billToCompany, setBillToCompany] = useState(caseData.bill_to_company ?? "");
+  const [billToAddress, setBillToAddress] = useState(caseData.bill_to_address ?? "");
+  const [billToContact, setBillToContact] = useState(caseData.bill_to_contact ?? "");
+  const [activeTab, setActiveTab] = useState<DraftTab>(initialDraft.active_tab ?? "items");
+  const [draftSaveStatus, setDraftSaveStatus] = useState<"idle" | "saving" | "saved" | "error">(
+    caseData.draft_updated_at ? "saved" : "idle"
+  );
+  const [draftSavedAt, setDraftSavedAt] = useState<Date | null>(
+    caseData.draft_updated_at ? new Date(caseData.draft_updated_at) : null
+  );
   const [loading, setLoading] = useState(false);
   const [actionError, setActionError] = useState("");
+  const didMountDraft = useRef(false);
+  const latestDraftRef = useRef<CaseDraft>(initialDraft);
+  const canSaveDraftRef = useRef(false);
 
   const caseId = caseData.id;
 
@@ -140,11 +188,36 @@ export function CaseDetail({ caseData }: { caseData: CaseData }) {
     });
   };
 
+  const saveBillTo = async () => {
+    if (!billToCompany.trim()) {
+      setActionError("请填写 Bill To 公司名称");
+      return;
+    }
+    await performAction(async () => {
+      await requestJson(`/api/cases/${caseId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          bill_to_company: billToCompany.trim(),
+          bill_to_address: billToAddress.trim() || null,
+          bill_to_contact: billToContact.trim() || null,
+        }),
+      });
+      await refreshCase();
+    });
+  };
+
   useEffect(() => {
     requestJson<History>(`/api/cases/${caseId}/history`)
       .then((data) => setHistory(data))
       .catch((error) => setActionError(error instanceof Error ? error.message : "历史数据加载失败"));
   }, [caseId]);
+
+  useEffect(() => {
+    requestJson<{ items: InventoryOption[] }>("/api/inventory")
+      .then((data) => setInventory(data.items.filter((item) => item.is_active)))
+      .catch((error) => setActionError(error instanceof Error ? error.message : "库存加载失败"));
+  }, []);
 
   const addRepairItem = async (name: string) => {
     if (!name.trim()) return;
@@ -178,24 +251,41 @@ export function CaseDetail({ caseData }: { caseData: CaseData }) {
     });
   };
 
-  const addPart = async (name: string, unit_price_cents: number, qty: number) => {
-    if (!name.trim() || unit_price_cents < 0 || qty < 1) return;
+  const addPart = async (unit_price_cents: number, qty: number, inventory_item_id: string) => {
+    const selectedItem = inventory.find((item) => item.id === inventory_item_id);
+    if (!selectedItem) {
+      setActionError("请先从库存选择配件");
+      return;
+    }
+    if (!Number.isFinite(unit_price_cents) || unit_price_cents < 0) {
+      setActionError("请输入正确的本单售价");
+      return;
+    }
+    if (!Number.isInteger(qty) || qty < 1) {
+      setActionError("配件数量必须是大于 0 的整数");
+      return;
+    }
+    if (qty > selectedItem.available_qty) {
+      setActionError(`库存不足，当前最多可用 ${selectedItem.available_qty} ${selectedItem.unit}`);
+      return;
+    }
     await performAction(async () => {
       await requestJson(`/api/cases/${caseId}/parts`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: name.trim(), unit_price_cents, qty }),
+        body: JSON.stringify({ unit_price_cents, qty, inventory_item_id }),
       });
       await refreshCase();
-      setNewPartName("");
       setNewPartPrice("");
       setNewPartQty("1");
+      setSelectedInventoryId("");
+      const inventoryData = await requestJson<{ items: InventoryOption[] }>("/api/inventory");
+      setInventory(inventoryData.items.filter((item) => item.is_active));
     });
   };
 
   const updatePart = async (
     partId: string,
-    name: string,
     unit_price_cents: number,
     qty: number
   ) => {
@@ -203,7 +293,7 @@ export function CaseDetail({ caseData }: { caseData: CaseData }) {
       await requestJson(`/api/cases/${caseId}/parts`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ id: partId, name, unit_price_cents, qty }),
+        body: JSON.stringify({ id: partId, unit_price_cents, qty }),
       });
       await refreshCase();
     });
@@ -303,6 +393,82 @@ export function CaseDetail({ caseData }: { caseData: CaseData }) {
   const isFinal = status === "CANCELED" || status === "COMPLETED";
   /** 仅「进行中」时可编辑维修项目、配件、人工；已提交未开始做单时仅可查看 */
   const canEditDetails = canEditCaseDetails(status);
+  const draftPayload: CaseDraft = {
+    active_tab: activeTab,
+    repair_item_name: newItemName,
+    selected_inventory_id: selectedInventoryId,
+    part_price: newPartPrice,
+    part_qty: newPartQty,
+    labor_name: newLaborName,
+    labor_hours: newLaborHours,
+    labor_rate: newLaborRate,
+    status_note: statusNote,
+  };
+  latestDraftRef.current = draftPayload;
+  canSaveDraftRef.current = canEditDetails;
+
+  useEffect(() => {
+    if (!canEditDetails) return;
+    if (!didMountDraft.current) {
+      didMountDraft.current = true;
+      return;
+    }
+
+    const controller = new AbortController();
+    setDraftSaveStatus("saving");
+    const timer = window.setTimeout(async () => {
+      try {
+        const response = await fetch(`/api/cases/${caseId}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ draft_data: draftPayload }),
+          signal: controller.signal,
+        });
+        if (!response.ok) throw new Error("SAVE_FAILED");
+        setDraftSaveStatus("saved");
+        setDraftSavedAt(new Date());
+      } catch (error) {
+        if (!(error instanceof DOMException && error.name === "AbortError")) {
+          setDraftSaveStatus("error");
+        }
+      }
+    }, 600);
+
+    return () => {
+      window.clearTimeout(timer);
+      controller.abort();
+    };
+  }, [
+    activeTab,
+    canEditDetails,
+    caseId,
+    newItemName,
+    newLaborHours,
+    newLaborName,
+    newLaborRate,
+    newPartPrice,
+    newPartQty,
+    selectedInventoryId,
+    statusNote,
+  ]);
+
+  useEffect(() => {
+    const saveBeforeLeaving = () => {
+      if (!canSaveDraftRef.current) return;
+      void fetch(`/api/cases/${caseId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ draft_data: latestDraftRef.current }),
+        keepalive: true,
+      });
+    };
+    window.addEventListener("pagehide", saveBeforeLeaving);
+    return () => {
+      window.removeEventListener("pagehide", saveBeforeLeaving);
+      saveBeforeLeaving();
+    };
+  }, [caseId]);
+
   const statusLabel = (s: CaseStatus) =>
     ({ SUBMITTED: "已提交", IN_PROGRESS: "进行中", CANCELED: "已取消", COMPLETED: "已完成" })[s] ?? s;
   const statusClass =
@@ -335,7 +501,42 @@ export function CaseDetail({ caseData }: { caseData: CaseData }) {
         </CardContent>
       </Card>
 
+      <Card className="rounded-2xl border-border/80 shadow-sm">
+        <CardHeader className="border-b bg-muted/30 p-5 sm:p-6">
+          <CardTitle className="text-lg">Bill To</CardTitle>
+        </CardHeader>
+        <CardContent className="grid gap-5 p-5 text-sm sm:grid-cols-2 sm:p-6 lg:grid-cols-[1fr_1fr_1.5fr_auto] lg:items-end">
+          <div className="grid gap-2">
+            <label className="text-xs font-medium uppercase tracking-wide text-muted-foreground">公司名称 *</label>
+            <Input value={billToCompany} onChange={(event) => setBillToCompany(event.target.value)} disabled={isFinal} />
+          </div>
+          <div className="grid gap-2">
+            <label className="text-xs font-medium uppercase tracking-wide text-muted-foreground">负责人</label>
+            <Input value={billToContact} onChange={(event) => setBillToContact(event.target.value)} disabled={isFinal} />
+          </div>
+          <div className="grid gap-2">
+            <label className="text-xs font-medium uppercase tracking-wide text-muted-foreground">地址</label>
+            <Input value={billToAddress} onChange={(event) => setBillToAddress(event.target.value)} disabled={isFinal} />
+          </div>
+          {!isFinal && <Button onClick={saveBillTo} disabled={loading || !billToCompany.trim()}>保存</Button>}
+        </CardContent>
+      </Card>
+
       <div className="rounded-2xl border border-border/80 bg-card p-3 shadow-sm sm:p-4">
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+        <p className="text-sm font-semibold">做单进度</p>
+        {canEditDetails && (
+          <p
+            className={`text-xs ${draftSaveStatus === "error" ? "text-destructive" : "text-muted-foreground"}`}
+            aria-live="polite"
+          >
+            {draftSaveStatus === "saving" && "正在自动保存…"}
+            {draftSaveStatus === "saved" && `已自动保存${draftSavedAt ? ` · ${draftSavedAt.toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" })}` : ""}`}
+            {draftSaveStatus === "error" && "草稿保存失败，请检查网络"}
+            {draftSaveStatus === "idle" && "输入内容会自动保存"}
+          </p>
+        )}
+      </div>
       <div className="flex flex-wrap gap-2">
         {canSubmitToProgress && (
           <Button onClick={() => changeStatus("IN_PROGRESS")} disabled={loading} className="min-h-[44px] sm:min-h-[40px] flex-1 sm:flex-none">
@@ -400,7 +601,7 @@ export function CaseDetail({ caseData }: { caseData: CaseData }) {
         </CardContent>
       </Card>
 
-      <Tabs defaultValue="items" className="w-full">
+      <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as DraftTab)} className="w-full">
         <TabsList className="w-full flex overflow-x-auto shrink-0 gap-1 p-1 min-h-[44px] sm:min-h-[40px]">
           <TabsTrigger value="items" className="flex-1 min-w-0 shrink-0 text-sm">维修项目</TabsTrigger>
           <TabsTrigger value="parts" className="flex-1 min-w-0 shrink-0 text-sm">配件</TabsTrigger>
@@ -409,38 +610,56 @@ export function CaseDetail({ caseData }: { caseData: CaseData }) {
         </TabsList>
         <TabsContent value="items" className="space-y-4 mt-4">
           {canEditDetails && (
-            <div className="flex flex-col sm:flex-row gap-3 sm:gap-2 sm:flex-wrap sm:items-end">
-              <Input
-                placeholder="项目名称"
-                value={newItemName}
-                onChange={(e) => setNewItemName(e.target.value)}
-                className="w-full sm:max-w-[200px] min-h-[44px] sm:min-h-[40px]"
-              />
-              <Select
-                onValueChange={(v) => {
-                  setNewItemName(v);
-                }}
-                value=""
-              >
-                <SelectTrigger className="w-full sm:w-[180px] min-h-[44px] sm:min-h-[40px]">
-                  <SelectValue placeholder="从历史选择" />
-                </SelectTrigger>
-                <SelectContent>
-                  {history?.repair_item_names?.map((name) => (
-                    <SelectItem key={name} value={name}>
-                      {name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              <Button onClick={() => addRepairItem(newItemName)} disabled={loading || !newItemName.trim()} className="min-h-[44px] sm:min-h-[40px] w-full sm:w-auto">
-                新增
-              </Button>
+            <div className="max-w-4xl rounded-xl border border-border/70 bg-card/50 p-4">
+              <div className="mb-3">
+                <p className="font-semibold">添加维修项目</p>
+                <p className="mt-1 text-xs text-muted-foreground">填写本次需要完成的维修内容，例如更换轮胎、检查刹车。</p>
+              </div>
+              <div className="grid gap-3 sm:grid-cols-[minmax(260px,1fr)_220px_auto] sm:items-end">
+                <div className="grid gap-1">
+                  <label className="text-sm font-medium text-muted-foreground">项目名称</label>
+                  <Input
+                    placeholder="输入维修项目"
+                    value={newItemName}
+                    onChange={(e) => setNewItemName(e.target.value)}
+                    className="min-h-[44px] w-full sm:min-h-[40px]"
+                  />
+                </div>
+                <div className="grid gap-1">
+                  <label className="text-sm font-medium text-muted-foreground">快速填充（可选）</label>
+                  <Select onValueChange={setNewItemName} value="">
+                    <SelectTrigger className="min-h-[44px] w-full sm:min-h-[40px]">
+                      <SelectValue placeholder="从历史项目选择" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {history?.repair_item_names?.map((name) => (
+                        <SelectItem key={name} value={name}>{name}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <Button
+                  onClick={() => addRepairItem(newItemName)}
+                  disabled={loading || !newItemName.trim()}
+                  className="min-h-[44px] w-full whitespace-nowrap sm:min-h-[40px] sm:w-auto"
+                >
+                  {loading ? "添加中…" : "添加项目"}
+                </Button>
+              </div>
             </div>
           )}
-          <ul className="space-y-2">
-            {caseState.repair_items.map((item) => (
-              <li key={item.id} className="flex gap-2 items-center flex-wrap">
+          <div className="max-w-4xl space-y-2">
+            <div className="flex items-center justify-between">
+              <h3 className="text-sm font-semibold">已添加项目</h3>
+              <span className="text-xs text-muted-foreground">共 {caseState.repair_items.length} 项</span>
+            </div>
+            {caseState.repair_items.length === 0 && (
+              <div className="rounded-xl border border-dashed border-border px-4 py-8 text-center text-sm text-muted-foreground">暂未添加维修项目</div>
+            )}
+            <ul className="space-y-2">
+            {caseState.repair_items.map((item, index) => (
+              <li key={item.id} className="grid grid-cols-[32px_minmax(0,1fr)_auto] items-center gap-3 rounded-xl border border-border/70 bg-card p-3">
+                <span className="flex size-8 items-center justify-center rounded-lg bg-primary/10 text-sm font-semibold text-primary">{index + 1}</span>
                 {!canEditDetails ? (
                   <span className="py-2">{item.name}</span>
                 ) : (
@@ -451,7 +670,7 @@ export function CaseDetail({ caseData }: { caseData: CaseData }) {
                         const v = e.target.value.trim();
                         if (v !== item.name) updateRepairItem(item.id, v);
                       }}
-                      className="flex-1 min-w-0 min-h-[44px] sm:min-h-[40px]"
+                      className="min-h-[44px] min-w-0 sm:min-h-[40px]"
                     />
                     <Button variant="destructive" size="sm" onClick={() => deleteRepairItem(item.id)} className="min-h-[44px] sm:min-h-[36px]">
                       删除
@@ -460,81 +679,93 @@ export function CaseDetail({ caseData }: { caseData: CaseData }) {
                 )}
               </li>
             ))}
-          </ul>
+            </ul>
+          </div>
         </TabsContent>
         <TabsContent value="parts" className="space-y-4 mt-4">
           {canEditDetails && (
-          <div className="flex flex-col sm:flex-row flex-wrap gap-3 sm:gap-4 sm:items-end">
-            <div className="grid gap-1 w-full sm:w-auto">
-              <label className="text-sm font-medium text-muted-foreground">配件名</label>
-              <Input
-                placeholder="配件名称"
-                value={newPartName}
-                onChange={(e) => setNewPartName(e.target.value)}
-                className="w-full sm:w-[140px] min-h-[44px] sm:min-h-[40px]"
-              />
+          <div className="grid gap-3 rounded-xl border border-border/70 bg-card/50 p-4 sm:grid-cols-[minmax(260px,1.7fr)_minmax(190px,1fr)_120px_auto] sm:items-start">
+            <div className="grid min-w-0 gap-1">
+              <label className="text-sm font-medium text-muted-foreground">从库存选择</label>
+              <Select
+                value={selectedInventoryId}
+                onValueChange={(value) => {
+                  setSelectedInventoryId(value);
+                  const item = inventory.find((option) => option.id === value);
+                  if (item) {
+                    setNewPartPrice((item.default_sale_price_cents / 100).toFixed(2));
+                    setNewPartQty("1");
+                  }
+                }}
+              >
+                <SelectTrigger className="min-h-[44px] w-full sm:min-h-[40px]">
+                  <SelectValue placeholder="选择库存配件" />
+                </SelectTrigger>
+                <SelectContent>
+                  {inventory.map((item) => (
+                    <SelectItem key={item.id} value={item.id} disabled={item.available_qty <= 0}>
+                      {item.sku} · {item.name}（可用 {item.available_qty} {item.unit}）
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p className="min-h-5 text-xs text-muted-foreground">
+                {selectedInventoryId
+                  ? `当前可用 ${inventory.find((item) => item.id === selectedInventoryId)?.available_qty ?? 0} ${inventory.find((item) => item.id === selectedInventoryId)?.unit ?? "个"}`
+                  : "只能选择当前有可用库存的配件"}
+              </p>
             </div>
-            <div className="grid gap-1 w-full sm:w-auto">
-              <label className="text-sm font-medium text-muted-foreground">单价（USD）</label>
+            <div className="grid min-w-0 gap-1">
+              <label className="text-sm font-medium text-muted-foreground">本单售价（默认建议价，可修改）</label>
               <Input
                 type="number"
                 step={0.01}
                 placeholder="0.00"
                 value={newPartPrice}
                 onChange={(e) => setNewPartPrice(e.target.value)}
-                className="w-full sm:w-[100px] min-h-[44px] sm:min-h-[40px]"
+                className="min-h-[44px] w-full sm:min-h-[40px]"
               />
+              <p className="min-h-5 text-xs text-muted-foreground">
+                {selectedInventoryId
+                  ? `建议售价 ${formatCents(inventory.find((item) => item.id === selectedInventoryId)?.default_sale_price_cents ?? 0)}`
+                  : "选择配件后自动带入"}
+              </p>
             </div>
-            <div className="grid gap-1 w-full sm:w-auto">
-              <label className="text-sm font-medium text-muted-foreground">数量（默认1个）</label>
+            <div className="grid min-w-0 gap-1">
+              <label className="text-sm font-medium text-muted-foreground">数量</label>
               <Input
                 type="number"
                 min={1}
                 placeholder="1"
                 value={newPartQty}
                 onChange={(e) => setNewPartQty(e.target.value)}
-                className="w-full sm:w-[80px] min-h-[44px] sm:min-h-[40px]"
+                className="min-h-[44px] w-full sm:min-h-[40px]"
               />
+              <p className="min-h-5 text-xs text-muted-foreground">默认 1 个</p>
             </div>
-            <div className="grid gap-1 w-full sm:w-auto">
-              <label className="text-sm font-medium text-muted-foreground">从历史选择</label>
-              <Select
-              onValueChange={(v) => {
-                const t = history?.part_templates?.find((x) => x.name === v);
-                if (t) {
-                  setNewPartName(t.name);
-                  setNewPartPrice((t.last_unit_price_cents / 100).toFixed(2));
-                  setNewPartQty("1");
+            <div className="grid min-w-0 gap-1">
+              <span className="text-sm font-medium text-transparent" aria-hidden="true">操作</span>
+              <Button
+                onClick={() =>
+                  addPart(
+                    Math.round(Number(newPartPrice) * 100),
+                    Number(newPartQty),
+                    selectedInventoryId
+                  )
                 }
-              }}
-              value=""
-            >
-              <SelectTrigger className="w-full sm:w-[160px] min-h-[44px] sm:min-h-[40px]">
-                <SelectValue placeholder="从历史选择" />
-              </SelectTrigger>
-              <SelectContent>
-                {history?.part_templates?.map((t) => (
-                  <SelectItem key={t.name} value={t.name}>
-                    {t.name}（{formatCents(t.last_unit_price_cents)}）
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+                disabled={loading || !selectedInventoryId || newPartPrice === ""}
+                className="min-h-[44px] w-full whitespace-nowrap sm:min-h-[40px]"
+              >
+                {loading ? "新增中…" : "新增配件"}
+              </Button>
+              <span className="min-h-5" aria-hidden="true" />
             </div>
-            <Button
-              onClick={() =>
-                addPart(
-                  newPartName,
-                  Math.round((Number(newPartPrice) || 0) * 100),
-                  Math.max(1, parseInt(newPartQty, 10) || 1)
-                )
-              }
-              disabled={loading || !newPartName.trim()}
-              className="min-h-[44px] sm:min-h-[40px] w-full sm:w-auto"
-            >
-              新增
-            </Button>
           </div>
+          )}
+          {actionError && activeTab === "parts" && (
+            <div role="alert" className="rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive">
+              {actionError}
+            </div>
           )}
           <div className="-mx-1 overflow-x-auto rounded-lg border border-border px-1 sm:mx-0 sm:px-0">
             <table className="w-full min-w-[680px] table-fixed text-sm">
@@ -560,8 +791,8 @@ export function CaseDetail({ caseData }: { caseData: CaseData }) {
                     key={p.id}
                     part={p}
                     readOnly={!canEditDetails}
-                    onSave={(name, unit_price_cents, qty) =>
-                      updatePart(p.id, name, unit_price_cents, qty)
+                    onSave={(unit_price_cents, qty) =>
+                      updatePart(p.id, unit_price_cents, qty)
                     }
                     onDelete={() => deletePart(p.id)}
                   />
@@ -742,21 +973,19 @@ function PartRow({
 }: {
   part: { id: string; name: string; unit_price_cents: number; qty: number; line_total_cents: number };
   readOnly?: boolean;
-  onSave: (name: string, unit_price_cents: number, qty: number) => void;
+  onSave: (unit_price_cents: number, qty: number) => void;
   onDelete: () => void;
 }) {
-  const [name, setName] = useState(part.name);
   const [price, setPrice] = useState((part.unit_price_cents / 100).toFixed(2));
   const [qty, setQty] = useState(String(part.qty));
   useEffect(() => {
-    setName(part.name);
     setPrice((part.unit_price_cents / 100).toFixed(2));
     setQty(String(part.qty));
-  }, [part.name, part.unit_price_cents, part.qty]);
+  }, [part.unit_price_cents, part.qty]);
   const handleBlur = () => {
     const up = Math.max(0, Math.round((Number(price) || 0) * 100));
     const q = Math.max(1, parseInt(qty, 10) || 1);
-    onSave(name.trim() || part.name, up, q);
+    onSave(up, q);
   };
   if (readOnly) {
     return (
@@ -770,14 +999,7 @@ function PartRow({
   }
   return (
     <tr className="border-b hover:bg-muted/20">
-      <td className="p-2 text-right sm:p-3">
-        <Input
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          onBlur={handleBlur}
-          className="min-h-[40px] sm:min-h-[32px] w-full max-w-[160px]"
-        />
-      </td>
+      <td className="p-2 text-left font-medium sm:p-3">{part.name}</td>
       <td className="p-2 sm:p-3">
         <Input
           type="number"

@@ -58,6 +58,9 @@ export type CasePdfInput = {
   companyName: string;
   invoiceNumber: string;
   date: Date;
+  billToCompany: string | null;
+  billToAddress: string | null;
+  billToContact: string | null;
   plate: string | null;
   vin: string | null;
   unit_number: string | null;
@@ -217,6 +220,26 @@ export async function generateCasePdf(input: CasePdfInput): Promise<GenerateCase
     y -= lineHeight;
   };
 
+  const drawWrapped = (
+    text: string,
+    opts?: { x?: number; size?: number; bold?: boolean; color?: RGB; maxWidth?: number; lineGap?: number },
+  ) => {
+    const size = opts?.size ?? 12;
+    const lineGap = opts?.lineGap ?? smallLine;
+    const lines = wrapText(text, opts?.maxWidth ?? 500, (value) => measureText(value, size, opts?.bold));
+    ensureSpace(lines.length * lineGap);
+    lines.forEach((line, index) => {
+      drawText(line, {
+        x: opts?.x ?? left,
+        y: y - index * lineGap,
+        size,
+        bold: opts?.bold,
+        color: opts?.color,
+      });
+    });
+    y -= lines.length * lineGap;
+  };
+
   // 标题区：公司名（左上）+ Invoice（右上，与公司名同一基线）；其下为地址与电话
   page.drawRectangle({
     x: 36,
@@ -228,7 +251,9 @@ export async function generateCasePdf(input: CasePdfInput): Promise<GenerateCase
     borderWidth: 0.8,
   });
   page.drawRectangle({ x: 36, y: height - 152, width: 6, height: 108, color: colors.brand });
-  draw(textForPdf(input.companyName), { bold: true, size: 20, color: colors.brand });
+  const safeCompanyName = textForPdf(input.companyName);
+  const companySize = Math.max(10, Math.min(20, (300 / Math.max(measureText(safeCompanyName, 20, true), 1)) * 20));
+  draw(safeCompanyName, { bold: true, size: companySize, color: colors.brand });
   const invoiceTitle = "Invoice";
   const invoiceSize = 16;
   const invoiceWidth = measureText(invoiceTitle, invoiceSize, true);
@@ -252,19 +277,54 @@ export async function generateCasePdf(input: CasePdfInput): Promise<GenerateCase
   draw(`Date: ${dateStr}`);
   y -= 12;
 
+  if (input.billToCompany) {
+    const billToLines = [
+      ...wrapText(textForPdf(input.billToCompany), 445, (value) => measureText(value, 12, true)),
+      ...(input.billToAddress
+        ? wrapText(`Address: ${textForPdf(input.billToAddress)}`, 445, (value) => measureText(value, 10))
+        : []),
+      ...(input.billToContact
+        ? wrapText(`Contact: ${textForPdf(input.billToContact)}`, 445, (value) => measureText(value, 10))
+        : []),
+    ];
+    const billToHeight = 30 + billToLines.length * smallLine;
+    ensureSpace(billToHeight + 12);
+    page.drawRectangle({
+      x: left - 6,
+      y: y - billToHeight + 10,
+      width: 470,
+      height: billToHeight,
+      color: colors.brandSoft,
+      borderColor: colors.brandBorder,
+      borderWidth: 0.8,
+    });
+    drawText("BILL TO", { x: left, y, size: 9, bold: true, color: colors.brandDark });
+    y -= 18;
+    billToLines.forEach((line, index) => {
+      drawText(line, {
+        x: left,
+        y,
+        size: index === 0 ? 12 : 10,
+        bold: index === 0,
+      });
+      y -= smallLine;
+    });
+    y -= 16;
+  }
+
   const vehicle: string[] = [];
   if (input.plate) vehicle.push(`Plate: ${textForPdf(input.plate)}`);
   if (input.vin) vehicle.push(`VIN: ${textForPdf(input.vin)}`);
   if (input.unit_number != null) vehicle.push(`Unit #: ${input.unit_number}`);
   if (vehicle.length) {
-    draw("Vehicle: " + vehicle.join(" | "));
+    drawWrapped("Vehicle: " + vehicle.join(" | "));
     y -= 8;
   }
   if (input.driver_name ?? input.driver_phone) {
     const driverParts: string[] = [];
     if (input.driver_name) driverParts.push(`Driver: ${textForPdf(input.driver_name)}`);
     if (input.driver_phone) driverParts.push(`Phone: ${textForPdf(input.driver_phone)}`);
-    draw(driverParts.join(" | "));
+    drawWrapped(driverParts.join(" | "));
     y -= 8;
   }
   const statusColor =
@@ -290,9 +350,7 @@ export async function generateCasePdf(input: CasePdfInput): Promise<GenerateCase
   if (input.repairItems.length) {
     draw("Repair Items:", { bold: true, size: 13, color: colors.brandDark });
     input.repairItems.forEach((name) => {
-      ensureSpace(smallLine);
-      drawText("• " + textForPdf(name), { x: left + 8, y, size: 11 });
-      y -= smallLine;
+      drawWrapped("• " + textForPdf(name), { x: left + 8, size: 11, maxWidth: 455 });
     });
     y -= 10;
   }
@@ -342,15 +400,19 @@ export async function generateCasePdf(input: CasePdfInput): Promise<GenerateCase
     };
     drawLaborHeader();
     input.labor.forEach((l) => {
-      if (y - smallLine < contentBottom) {
+      const nameLines = wrapText(textForPdf(l.name), 185, (value) => measureText(value, 11));
+      const rowHeight = Math.max(smallLine, nameLines.length * smallLine);
+      if (y - rowHeight < contentBottom) {
         addContinuationPage();
         drawLaborHeader();
       }
-      drawText(textForPdf(l.name).slice(0, 28), { x: left, y, size: 11 });
+      nameLines.forEach((line, index) => {
+        drawText(line, { x: left, y: y - index * smallLine, size: 11 });
+      });
       drawText(String(l.hours), { x: left + 200, y, size: 11 });
       drawText(formatCents(l.rate_cents), { x: left + 280, y, size: 11 });
       drawText(formatCents(l.line_total_cents), { x: left + 360, y, size: 11 });
-      y -= smallLine;
+      y -= rowHeight;
     });
     y -= 10;
   }

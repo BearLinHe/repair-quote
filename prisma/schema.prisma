@@ -15,6 +15,28 @@ enum CaseStatus {
   COMPLETED
 }
 
+enum PurchaseOrderStatus {
+  DRAFT
+  RECEIVED
+  CANCELED
+}
+
+enum StockMovementType {
+  PURCHASE_RECEIPT
+  CASE_RESERVE
+  CASE_RELEASE
+  CASE_CONSUMPTION
+  COUNT_ADJUSTMENT
+  MANUAL_ADJUSTMENT
+}
+
+enum InvoicePaymentStatus {
+  UNPAID
+  PARTIAL
+  PAID
+  VOID
+}
+
 model Case {
   id                   String     @id @default(uuid())
   invoice_number       String     @unique
@@ -27,6 +49,9 @@ model Case {
   customer_name        String?
   customer_phone       String?
   customer_email       String?
+  bill_to_company      String?
+  bill_to_address      String?
+  bill_to_contact      String?
   check_in_at          DateTime?
   status               CaseStatus @default(SUBMITTED)
   parts_subtotal_cents Int        @default(0)
@@ -37,11 +62,14 @@ model Case {
   tax_cents            Int        @default(0)
   grand_total_cents    Int        @default(0)
   notes                String?
+  draft_data           Json?
+  draft_updated_at     DateTime?
 
   repair_items CaseRepairItem[]
   parts        CasePart[]
   labor        CaseLabor[]
   status_logs  CaseStatusLog[]
+  invoice      InvoiceRecord?
 }
 
 model CaseRepairItem {
@@ -56,16 +84,23 @@ model CaseRepairItem {
 }
 
 model CasePart {
-  id               String   @id @default(uuid())
-  created_at       DateTime @default(now())
-  updated_at       DateTime @updatedAt
-  case_id          String
-  name             String
-  unit_price_cents Int
-  qty              Int
-  line_total_cents Int
+  id                       String   @id @default(uuid())
+  created_at               DateTime @default(now())
+  updated_at               DateTime @updatedAt
+  case_id                  String
+  name                     String
+  unit_price_cents         Int
+  qty                      Int
+  line_total_cents         Int
+  inventory_item_id        String?
+  unit_cost_snapshot_cents Int      @default(0)
+  cost_total_cents         Int      @default(0)
+  reservation_active       Boolean  @default(false)
 
-  case Case @relation(fields: [case_id], references: [id], onDelete: Cascade)
+  case           Case           @relation(fields: [case_id], references: [id], onDelete: Cascade)
+  inventory_item InventoryItem? @relation(fields: [inventory_item_id], references: [id], onDelete: SetNull)
+
+  @@index([inventory_item_id])
 }
 
 model CaseLabor {
@@ -103,4 +138,125 @@ model Setting {
   cleaning_cap_cents Int      @default(20000)
   tax_rate_bps       Int      @default(1075)
   company_name       String   @default("YaoYuan Inc.")
+}
+
+model InventoryItem {
+  id                       String   @id @default(uuid())
+  created_at               DateTime @default(now())
+  updated_at               DateTime @updatedAt
+  clerk_user_id            String
+  sku                      String
+  name                     String
+  category                 String?
+  unit                     String   @default("个")
+  on_hand_qty              Int      @default(0)
+  reserved_qty             Int      @default(0)
+  avg_cost_cents           Int      @default(0)
+  default_sale_price_cents Int      @default(0)
+  reorder_level            Int      @default(0)
+  is_active                Boolean  @default(true)
+
+  purchase_lines PurchaseOrderLine[]
+  case_parts     CasePart[]
+  movements      StockMovement[]
+
+  @@unique([clerk_user_id, sku])
+  @@index([clerk_user_id, name])
+}
+
+model PurchaseOrder {
+  id                    String              @id @default(uuid())
+  created_at            DateTime            @default(now())
+  updated_at            DateTime            @updatedAt
+  clerk_user_id         String
+  purchase_number       String              @unique
+  supplier              String
+  purchase_date         DateTime
+  status                PurchaseOrderStatus @default(DRAFT)
+  subtotal_cents        Int                 @default(0)
+  additional_cost_cents Int                 @default(0)
+  total_cents           Int                 @default(0)
+  notes                 String?
+  received_at           DateTime?
+  received_by           String?
+
+  lines PurchaseOrderLine[]
+
+  @@index([clerk_user_id, purchase_date])
+}
+
+model PurchaseOrderLine {
+  id                String   @id @default(uuid())
+  created_at        DateTime @default(now())
+  purchase_order_id String
+  inventory_item_id String
+  name_snapshot     String
+  qty               Int
+  unit_cost_cents   Int
+  line_total_cents  Int
+
+  purchase_order PurchaseOrder @relation(fields: [purchase_order_id], references: [id], onDelete: Cascade)
+  inventory_item InventoryItem @relation(fields: [inventory_item_id], references: [id], onDelete: Restrict)
+
+  @@index([purchase_order_id])
+  @@index([inventory_item_id])
+}
+
+model StockMovement {
+  id                String            @id @default(uuid())
+  created_at        DateTime          @default(now())
+  clerk_user_id     String
+  inventory_item_id String
+  type              StockMovementType
+  qty_change        Int               @default(0)
+  reserved_change   Int               @default(0)
+  unit_cost_cents   Int               @default(0)
+  total_cost_cents  Int               @default(0)
+  reference_type    String?
+  reference_id      String?
+  note              String?
+
+  inventory_item InventoryItem @relation(fields: [inventory_item_id], references: [id], onDelete: Restrict)
+
+  @@index([inventory_item_id, created_at])
+  @@index([clerk_user_id, created_at])
+}
+
+model InvoiceRecord {
+  id                  String               @id @default(uuid())
+  created_at          DateTime             @default(now())
+  updated_at          DateTime             @updatedAt
+  clerk_user_id       String
+  case_id             String               @unique
+  invoice_number      String               @unique
+  issued_at           DateTime             @default(now())
+  parts_revenue_cents Int
+  labor_revenue_cents Int
+  cleaning_fee_cents  Int
+  tax_cents           Int
+  grand_total_cents   Int
+  parts_cost_cents    Int                  @default(0)
+  payment_status      InvoicePaymentStatus @default(UNPAID)
+  snapshot            Json
+
+  case Case @relation(fields: [case_id], references: [id], onDelete: Restrict)
+
+  @@index([clerk_user_id, issued_at])
+}
+
+model AuditLog {
+  id            String   @id @default(uuid())
+  created_at    DateTime @default(now())
+  actor_user_id String
+  actor_name    String
+  actor_email   String?
+  action        String
+  entity_type   String
+  entity_id     String?
+  entity_label  String?
+  details       Json?
+
+  @@index([created_at])
+  @@index([actor_user_id, created_at])
+  @@index([entity_type, entity_id, created_at])
 }

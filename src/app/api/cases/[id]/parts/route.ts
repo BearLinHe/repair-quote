@@ -5,6 +5,8 @@ import { requireAuth, unauthorizedResponse } from "@/lib/auth";
 import { recalcTotals } from "@/lib/recalc";
 import { apiError } from "@/lib/api-error";
 import { canEditCaseDetails } from "@/lib/case-rules";
+import { changeReservation, reserveInventory } from "@/lib/inventory";
+import { auditData, getAuditActor } from "@/lib/audit";
 
 async function checkCase(id: string, userId: string) {
   const c = await prisma.case.findUnique({ where: { id }, select: { clerk_user_id: true, status: true } });
@@ -18,12 +20,11 @@ function editAccessError(status: Awaited<ReturnType<typeof checkCase>>) {
 }
 
 const createSchema = z.object({
-  name: z.string().min(1),
-  unit_price_cents: z.number().int().min(0),
+  unit_price_cents: z.number().int().min(0).optional(),
   qty: z.number().int().min(1),
+  inventory_item_id: z.string().uuid(),
 });
 const updateSchema = z.object({
-  name: z.string().min(1).optional(),
   unit_price_cents: z.number().int().min(0).optional(),
   qty: z.number().int().min(1).optional(),
 });
@@ -44,16 +45,37 @@ export async function POST(
     qty: body.qty != null ? Number(body.qty) : undefined,
   });
   if (!parsed.success) return apiError("VALIDATION_ERROR", "配件信息格式不正确", 400, parsed.error.flatten());
-  const { name, unit_price_cents, qty } = parsed.data;
-  const line_total_cents = unit_price_cents * qty;
-  const part = await prisma.$transaction(async (tx) => {
-    const created = await tx.casePart.create({
-      data: { case_id: id, name: name.trim(), unit_price_cents, qty, line_total_cents },
+  const { unit_price_cents, qty, inventory_item_id } = parsed.data;
+  const actor = await getAuditActor(userId);
+  try {
+    const part = await prisma.$transaction(async (tx) => {
+      const inventoryItem = await tx.inventoryItem.findFirst({ where: { id: inventory_item_id, clerk_user_id: userId, is_active: true } });
+      if (!inventoryItem) throw new Error("INVENTORY_ITEM_NOT_FOUND");
+      const resolvedUnitPrice = unit_price_cents ?? inventoryItem.default_sale_price_cents;
+      const created = await tx.casePart.create({
+        data: {
+          case_id: id,
+          name: inventoryItem.name,
+          unit_price_cents: resolvedUnitPrice,
+          qty,
+          line_total_cents: resolvedUnitPrice * qty,
+          inventory_item_id: inventoryItem.id,
+          unit_cost_snapshot_cents: inventoryItem.avg_cost_cents,
+          cost_total_cents: inventoryItem.avg_cost_cents * qty,
+          reservation_active: true,
+        },
+      });
+      await reserveInventory(tx, { itemId: inventoryItem.id, qty, userId, casePartId: created.id, note: `维修单 ${id}` });
+      await recalcTotals(id, tx);
+      await tx.auditLog.create({ data: auditData(actor, { action: "CASE_PART_ADDED", entityType: "CASE", entityId: id, entityLabel: inventoryItem.name, details: { qty, unit_price_cents: resolvedUnitPrice } }) });
+      return created;
     });
-    await recalcTotals(id, tx);
-    return created;
-  });
-  return Response.json(part);
+    return Response.json(part);
+  } catch (error) {
+    if (error instanceof Error && error.message === "INVENTORY_ITEM_NOT_FOUND") return apiError("INVENTORY_ITEM_NOT_FOUND", "库存商品不存在或已停用", 404);
+    if (error instanceof Error && error.message === "INSUFFICIENT_INVENTORY") return apiError("INSUFFICIENT_INVENTORY", "可用库存不足", 409);
+    throw error;
+  }
 }
 
 export async function PUT(
@@ -78,19 +100,38 @@ export async function PUT(
     where: { id: partId, case_id: id },
   });
   if (!existing) return apiError("PART_NOT_FOUND", "配件不存在", 404);
-  const name = parsed.data.name !== undefined ? parsed.data.name.trim() : existing.name;
   const unit_price_cents = parsed.data.unit_price_cents ?? existing.unit_price_cents;
   const qty = parsed.data.qty ?? existing.qty;
   const line_total_cents = unit_price_cents * qty;
-  const part = await prisma.$transaction(async (tx) => {
-    const updated = await tx.casePart.update({
-      where: { id: partId },
-      data: { name, unit_price_cents, qty, line_total_cents },
+  const actor = await getAuditActor(userId);
+  try {
+    const part = await prisma.$transaction(async (tx) => {
+      if (existing.inventory_item_id && existing.reservation_active && qty !== existing.qty) {
+        await changeReservation(tx, {
+          itemId: existing.inventory_item_id,
+          delta: qty - existing.qty,
+          userId,
+          casePartId: existing.id,
+        });
+      }
+      const updated = await tx.casePart.update({
+        where: { id: partId },
+        data: {
+          unit_price_cents,
+          qty,
+          line_total_cents,
+          cost_total_cents: existing.unit_cost_snapshot_cents * qty,
+        },
+      });
+      await recalcTotals(id, tx);
+      await tx.auditLog.create({ data: auditData(actor, { action: "CASE_PART_UPDATED", entityType: "CASE", entityId: id, entityLabel: existing.name, details: { qty, unit_price_cents } }) });
+      return updated;
     });
-    await recalcTotals(id, tx);
-    return updated;
-  });
-  return Response.json(part);
+    return Response.json(part);
+  } catch (error) {
+    if (error instanceof Error && error.message === "INSUFFICIENT_INVENTORY") return apiError("INSUFFICIENT_INVENTORY", "可用库存不足", 409);
+    throw error;
+  }
 }
 
 export async function DELETE(
@@ -109,9 +150,19 @@ export async function DELETE(
     where: { id: partId, case_id: id },
   });
   if (!existing) return apiError("PART_NOT_FOUND", "配件不存在", 404);
+  const actor = await getAuditActor(userId);
   await prisma.$transaction(async (tx) => {
+    if (existing.inventory_item_id && existing.reservation_active) {
+      await changeReservation(tx, {
+        itemId: existing.inventory_item_id,
+        delta: -existing.qty,
+        userId,
+        casePartId: existing.id,
+      });
+    }
     await tx.casePart.delete({ where: { id: partId } });
     await recalcTotals(id, tx);
+    await tx.auditLog.create({ data: auditData(actor, { action: "CASE_PART_DELETED", entityType: "CASE", entityId: id, entityLabel: existing.name, details: { qty: existing.qty } }) });
   });
   return Response.json({ ok: true });
 }

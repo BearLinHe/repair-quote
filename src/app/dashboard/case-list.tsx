@@ -1,10 +1,10 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { formatCents } from "@/lib/utils";
 import { Button, buttonVariants } from "@/components/ui/button";
-import { Inbox, RefreshCw, Search } from "lucide-react";
+import { CircleDollarSign, ClipboardCheck, Clock3, Files, Inbox, RefreshCw, Search } from "lucide-react";
 
 type CaseRow = {
   id: string;
@@ -23,6 +23,7 @@ export function CaseList() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<"unauthorized" | "server" | "network" | null>(null);
   const [retryKey, setRetryKey] = useState(0);
+  const [statusFilter, setStatusFilter] = useState("ALL");
 
   useEffect(() => {
     const controller = new AbortController();
@@ -63,23 +64,49 @@ export function CaseList() {
     ({ SUBMITTED: "已提交", IN_PROGRESS: "进行中", CANCELED: "已取消", COMPLETED: "已完成" })[s] ?? s;
   const statusClass = (s: string) =>
     ({
-      SUBMITTED: "bg-sky-50 text-sky-700 ring-sky-600/20",
-      IN_PROGRESS: "bg-amber-50 text-amber-700 ring-amber-600/20",
-      COMPLETED: "bg-emerald-50 text-emerald-700 ring-emerald-600/20",
-      CANCELED: "bg-slate-100 text-slate-600 ring-slate-500/20",
+      SUBMITTED: "bg-sky-50 text-sky-700 ring-sky-600/20 dark:bg-sky-950/50 dark:text-sky-300",
+      IN_PROGRESS: "bg-amber-50 text-amber-700 ring-amber-600/20 dark:bg-amber-950/50 dark:text-amber-300",
+      COMPLETED: "bg-emerald-50 text-emerald-700 ring-emerald-600/20 dark:bg-emerald-950/50 dark:text-emerald-300",
+      CANCELED: "bg-slate-100 text-slate-600 ring-slate-500/20 dark:bg-slate-800 dark:text-slate-300",
     })[s] ?? "bg-muted text-muted-foreground ring-border";
+  const visibleCases = useMemo(
+    () => statusFilter === "ALL" ? cases : cases.filter((item) => item.status === statusFilter),
+    [cases, statusFilter],
+  );
+  const summary = useMemo(() => ({
+    total: cases.length,
+    active: cases.filter((item) => item.status === "IN_PROGRESS").length,
+    completed: cases.filter((item) => item.status === "COMPLETED").length,
+    amount: cases.filter((item) => item.status !== "CANCELED").reduce((sum, item) => sum + item.grand_total_cents, 0),
+  }), [cases]);
 
   return (
-    <div className="space-y-4">
-      <div className="relative max-w-2xl">
+    <div className="space-y-5">
+      {!loading && !error && <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        {[
+          { label: "全部维修单", value: summary.total, icon: Files, note: "累计创建" },
+          { label: "正在维修", value: summary.active, icon: Clock3, note: "需要跟进" },
+          { label: "已完成", value: summary.completed, icon: ClipboardCheck, note: "已形成 Invoice" },
+          { label: "有效报价总额", value: formatCents(summary.amount), icon: CircleDollarSign, note: "不含已取消" },
+        ].map(({ label, value, icon: Icon, note }) => <div key={label} className="surface-panel flex items-center gap-4 p-4 sm:p-5">
+          <span className="flex size-11 shrink-0 items-center justify-center rounded-2xl bg-primary/10 text-primary"><Icon className="size-5"/></span>
+          <div className="min-w-0"><p className="text-xs font-medium text-muted-foreground">{label}</p><p className="mt-0.5 truncate text-xl font-bold tabular-nums">{value}</p><p className="text-[11px] text-muted-foreground">{note}</p></div>
+        </div>)}
+      </div>}
+      <div className="surface-panel flex flex-col gap-3 p-3 sm:flex-row sm:items-center sm:p-4">
+      <div className="relative min-w-0 flex-1">
         <Search className="pointer-events-none absolute left-3.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
         <input
           type="search"
           placeholder="搜索 Invoice Number / 车牌 / 车架号 / 车号"
-          className="min-h-12 w-full rounded-xl border border-input bg-card py-2.5 pl-10 pr-4 text-sm shadow-sm outline-none transition-shadow placeholder:text-muted-foreground focus:ring-2 focus:ring-ring/30"
+          className="min-h-12 w-full rounded-xl border border-input bg-background/70 py-2.5 pl-10 pr-4 text-sm shadow-sm outline-none transition-all placeholder:text-muted-foreground focus:border-primary/40 focus:ring-2 focus:ring-ring/20"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
         />
+      </div>
+      <div className="flex gap-1 overflow-x-auto rounded-xl bg-muted/70 p-1">
+        {[["ALL","全部"],["SUBMITTED","已提交"],["IN_PROGRESS","进行中"],["COMPLETED","已完成"],["CANCELED","已取消"]].map(([value, label]) => <button key={value} onClick={() => setStatusFilter(value)} className={`min-h-9 whitespace-nowrap rounded-lg px-3 text-xs font-semibold transition-all ${statusFilter === value ? "bg-card text-primary shadow-sm" : "text-muted-foreground hover:text-foreground"}`}>{label}</button>)}
+      </div>
       </div>
       {loading ? (
         <div className="flex min-h-40 items-center justify-center gap-2 text-sm text-muted-foreground" aria-live="polite">
@@ -110,11 +137,17 @@ export function CaseList() {
           <p className="font-medium text-foreground">暂无维修单</p>
           <p className="mt-1 text-sm">新建维修单后会显示在这里。</p>
         </div>
+      ) : visibleCases.length === 0 ? (
+        <div className="surface-panel p-10 text-center text-muted-foreground">
+          <Inbox className="mx-auto mb-3 size-8" />
+          <p className="font-medium text-foreground">当前筛选下没有维修单</p>
+          <button className="mt-2 text-sm font-medium text-primary hover:underline" onClick={() => setStatusFilter("ALL")}>查看全部维修单</button>
+        </div>
       ) : (
         <>
           {/* 移动端：卡片列表 */}
           <div className="space-y-3 sm:hidden">
-            {cases.map((c) => (
+            {visibleCases.map((c) => (
               <Link
                 key={c.id}
                 href={`/cases/${c.id}`}
@@ -136,9 +169,9 @@ export function CaseList() {
             ))}
           </div>
           {/* 桌面端：表格 */}
-          <div className="hidden overflow-hidden rounded-2xl border border-border/80 bg-card shadow-sm sm:block">
+          <div className="surface-panel hidden overflow-hidden sm:block">
             <div className="overflow-x-auto">
-              <table className="w-full min-w-[940px] text-sm">
+              <table className="data-table w-full min-w-[1040px] text-sm">
                 <thead>
                   <tr className="border-b bg-muted/60 text-xs uppercase tracking-wide text-muted-foreground">
                     <th className="px-4 py-3.5 text-left font-semibold">Invoice Number</th>
@@ -152,7 +185,7 @@ export function CaseList() {
                   </tr>
                 </thead>
                 <tbody>
-                  {cases.map((c) => (
+                  {visibleCases.map((c) => (
                     <tr key={c.id} className="border-b last:border-0 hover:bg-muted/30 transition-colors">
                       <td className="px-4 py-4 font-mono text-xs tabular-nums">{c.invoice_number}</td>
                       <td className="px-4 py-4 font-medium">{c.plate ?? "-"}</td>
