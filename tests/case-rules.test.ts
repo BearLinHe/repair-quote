@@ -13,10 +13,10 @@ test("allows only configured case status transitions", () => {
   assert.equal(canTransitionCase("CANCELED", "SUBMITTED"), false);
 });
 
-test("allows detail edits only while a case is in progress", () => {
+test("allows detail edits while a case is in progress or completed", () => {
   assert.equal(canEditCaseDetails("IN_PROGRESS"), true);
   assert.equal(canEditCaseDetails("SUBMITTED"), false);
-  assert.equal(canEditCaseDetails("COMPLETED"), false);
+  assert.equal(canEditCaseDetails("COMPLETED"), true);
   assert.equal(canEditCaseDetails("CANCELED"), false);
 });
 

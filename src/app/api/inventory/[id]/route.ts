@@ -4,6 +4,7 @@ import { prisma } from "@/lib/db";
 import { requireAuth, unauthorizedResponse } from "@/lib/auth";
 import { apiError } from "@/lib/api-error";
 import { auditData, getAuditActor } from "@/lib/audit";
+import { inventoryImageSchema } from "@/lib/inventory-image";
 
 const schema = z.object({
   name: z.string().trim().min(1).max(200).optional(),
@@ -12,6 +13,7 @@ const schema = z.object({
   default_sale_price_cents: z.number().int().min(0).optional(),
   reorder_level: z.number().int().min(0).optional(),
   is_active: z.boolean().optional(),
+  image_data_url: inventoryImageSchema,
 });
 
 export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {

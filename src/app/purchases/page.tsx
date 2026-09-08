@@ -9,10 +9,11 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { formatCents } from "@/lib/utils";
 import { apiErrorMessage } from "@/lib/api-error";
+import { InventoryImageInput } from "@/components/inventory-image-input";
 
-type Item = { id: string; sku: string; name: string; unit: string; is_active: boolean };
+type Item = { id: string; sku: string; name: string; unit: string; is_active: boolean; image_data_url: string | null };
 type Line = { inventory_item_id: string; qty: string; unit_cost: string };
-type NewItemForm = { sku: string; name: string; category: string; unit: string; salePrice: string; reorderLevel: string };
+type NewItemForm = { sku: string; name: string; category: string; unit: string; salePrice: string; reorderLevel: string; imageDataUrl: string | null };
 type Order = {
   id: string;
   purchase_number: string;
@@ -34,7 +35,7 @@ function localDateValue(date: Date) {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
 }
 
-const emptyNewItem: NewItemForm = { sku: "", name: "", category: "", unit: "个", salePrice: "", reorderLevel: "0" };
+const emptyNewItem: NewItemForm = { sku: "", name: "", category: "", unit: "个", salePrice: "", reorderLevel: "0", imageDataUrl: null };
 
 export default function PurchasesPage() {
   const [items, setItems] = useState<Item[]>([]);
@@ -121,6 +122,7 @@ export default function PurchasesPage() {
           unit: newItem.unit.trim(),
           default_sale_price_cents: Math.round((Number(newItem.salePrice) || 0) * 100),
           reorder_level: Math.max(0, Math.floor(Number(newItem.reorderLevel) || 0)),
+          image_data_url: newItem.imageDataUrl,
         }),
       });
       setItems((current) => [...current, created].sort((a, b) => a.name.localeCompare(b.name, "zh-CN")));
@@ -223,7 +225,7 @@ export default function PurchasesPage() {
                       <label className="text-xs font-semibold text-muted-foreground lg:hidden">库存零件</label>
                       <Select value={line.inventory_item_id} onValueChange={(value) => updateLine(index, { inventory_item_id: value })}>
                         <SelectTrigger><SelectValue placeholder="按 SKU 或名称选择已有零件" /></SelectTrigger>
-                        <SelectContent>{items.map((item) => <SelectItem key={item.id} value={item.id}>{item.sku} · {item.name}</SelectItem>)}</SelectContent>
+                        <SelectContent>{items.map((item) => <SelectItem key={item.id} value={item.id}><span className="flex items-center gap-2">{item.image_data_url ? <img src={item.image_data_url} alt="" className="size-7 rounded-md object-cover" /> : <span className="size-7 rounded-md bg-muted" />}<span>{item.sku} · {item.name}</span></span></SelectItem>)}</SelectContent>
                       </Select>
                       <button type="button" onClick={() => openNewItem(index)} className="inline-flex min-h-8 items-center gap-1.5 rounded-lg px-2 text-xs font-semibold text-primary hover:bg-primary/10"><PackagePlus className="size-3.5" />新建零件</button>
                     </div>
@@ -267,6 +269,7 @@ export default function PurchasesPage() {
               <div className="space-y-1.5"><label className="text-xs font-semibold text-muted-foreground">库存单位 *</label><Select value={newItem.unit} onValueChange={(value) => setNewItem({ ...newItem, unit: value })}><SelectTrigger><SelectValue placeholder="选择单位" /></SelectTrigger><SelectContent><SelectItem value="个">个</SelectItem><SelectItem value="件">件</SelectItem><SelectItem value="套">套</SelectItem><SelectItem value="瓶">瓶</SelectItem><SelectItem value="箱">箱</SelectItem><SelectItem value="升">升</SelectItem><SelectItem value="卷">卷</SelectItem></SelectContent></Select></div>
               <div className="space-y-1.5"><label className="text-xs font-semibold text-muted-foreground">最低库存提醒</label><Input type="number" min="0" value={newItem.reorderLevel} onChange={(event) => setNewItem({ ...newItem, reorderLevel: event.target.value })} /></div>
               <div className="space-y-1.5"><label className="text-xs font-semibold text-muted-foreground">默认销售价（可选）</label><Input type="number" min="0" step="0.01" placeholder="向客户报价的参考价" value={newItem.salePrice} onChange={(event) => setNewItem({ ...newItem, salePrice: event.target.value })} /></div>
+              <div className="sm:col-span-2"><InventoryImageInput value={newItem.imageDataUrl} onChange={(imageDataUrl) => setNewItem({ ...newItem, imageDataUrl })} disabled={creatingItem} /></div>
             </div>
             <div className="flex flex-col gap-3 border-t bg-muted/25 p-5 sm:flex-row sm:items-center sm:justify-between sm:p-6">
               <div>{newItemError && <p className="text-sm text-destructive">{newItemError}</p>}</div>

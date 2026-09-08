@@ -4,6 +4,7 @@ import { prisma } from "@/lib/db";
 import { requireAuth, unauthorizedResponse } from "@/lib/auth";
 import { apiError } from "@/lib/api-error";
 import { auditData, getAuditActor } from "@/lib/audit";
+import { inventoryImageSchema } from "@/lib/inventory-image";
 
 const newItemSchema = z.object({
   sku: z.string().trim().min(1).max(50),
@@ -12,6 +13,7 @@ const newItemSchema = z.object({
   unit: z.string().trim().min(1).max(20).default("个"),
   default_sale_price_cents: z.number().int().min(0).default(0),
   reorder_level: z.number().int().min(0).default(0),
+  image_data_url: inventoryImageSchema,
 });
 
 const schema = z.object({

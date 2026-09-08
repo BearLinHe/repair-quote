@@ -12,7 +12,7 @@ export function canTransitionCase(from: CaseStatus, to: CaseStatus): boolean {
 }
 
 export function canEditCaseDetails(status: CaseStatus): boolean {
-  return status === "IN_PROGRESS";
+  return status === "IN_PROGRESS" || status === "COMPLETED";
 }
 
 export function ownsCase(ownerUserId: string, currentUserId: string): boolean {

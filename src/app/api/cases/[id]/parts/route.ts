@@ -5,8 +5,9 @@ import { requireAuth, unauthorizedResponse } from "@/lib/auth";
 import { recalcTotals } from "@/lib/recalc";
 import { apiError } from "@/lib/api-error";
 import { canEditCaseDetails } from "@/lib/case-rules";
-import { changeReservation, reserveInventory } from "@/lib/inventory";
+import { changeCompletedConsumption, changeReservation, reserveInventory } from "@/lib/inventory";
 import { auditData, getAuditActor } from "@/lib/audit";
+import { syncCompletedInvoice } from "@/lib/invoice-record";
 
 async function checkCase(id: string, userId: string) {
   const c = await prisma.case.findUnique({ where: { id }, select: { clerk_user_id: true, status: true } });
@@ -15,7 +16,7 @@ async function checkCase(id: string, userId: string) {
 
 function editAccessError(status: Awaited<ReturnType<typeof checkCase>>) {
   if (!status) return apiError("CASE_NOT_FOUND", "维修单不存在", 404);
-  if (!canEditCaseDetails(status)) return apiError("CASE_READ_ONLY", "维修单仅在进行中可以修改", 409);
+  if (!canEditCaseDetails(status)) return apiError("CASE_READ_ONLY", "已取消的维修单不能修改", 409);
   return null;
 }
 
@@ -36,7 +37,8 @@ export async function POST(
   const userId = await requireAuth();
   if (!userId) return unauthorizedResponse();
   const { id } = await params;
-  const accessError = editAccessError(await checkCase(id, userId));
+  const caseStatus = await checkCase(id, userId);
+  const accessError = editAccessError(caseStatus);
   if (accessError) return accessError;
   const body = await req.json();
   const parsed = createSchema.safeParse({
@@ -62,11 +64,16 @@ export async function POST(
           inventory_item_id: inventoryItem.id,
           unit_cost_snapshot_cents: inventoryItem.avg_cost_cents,
           cost_total_cents: inventoryItem.avg_cost_cents * qty,
-          reservation_active: true,
+          reservation_active: caseStatus === "IN_PROGRESS",
         },
       });
-      await reserveInventory(tx, { itemId: inventoryItem.id, qty, userId, casePartId: created.id, note: `维修单 ${id}` });
+      if (caseStatus === "COMPLETED") {
+        await changeCompletedConsumption(tx, { itemId: inventoryItem.id, delta: qty, userId, casePartId: created.id, unitCostCents: inventoryItem.avg_cost_cents });
+      } else {
+        await reserveInventory(tx, { itemId: inventoryItem.id, qty, userId, casePartId: created.id, note: `维修单 ${id}` });
+      }
       await recalcTotals(id, tx);
+      if (caseStatus === "COMPLETED") await syncCompletedInvoice(id, tx);
       await tx.auditLog.create({ data: auditData(actor, { action: "CASE_PART_ADDED", entityType: "CASE", entityId: id, entityLabel: inventoryItem.name, details: { qty, unit_price_cents: resolvedUnitPrice } }) });
       return created;
     });
@@ -85,7 +92,8 @@ export async function PUT(
   const userId = await requireAuth();
   if (!userId) return unauthorizedResponse();
   const { id } = await params;
-  const accessError = editAccessError(await checkCase(id, userId));
+  const caseStatus = await checkCase(id, userId);
+  const accessError = editAccessError(caseStatus);
   if (accessError) return accessError;
   const body = await req.json();
   const partId = body.id as string | undefined;
@@ -114,6 +122,9 @@ export async function PUT(
           casePartId: existing.id,
         });
       }
+      if (caseStatus === "COMPLETED" && existing.inventory_item_id && qty !== existing.qty) {
+        await changeCompletedConsumption(tx, { itemId: existing.inventory_item_id, delta: qty - existing.qty, userId, casePartId: existing.id, unitCostCents: existing.unit_cost_snapshot_cents });
+      }
       const updated = await tx.casePart.update({
         where: { id: partId },
         data: {
@@ -124,6 +135,7 @@ export async function PUT(
         },
       });
       await recalcTotals(id, tx);
+      if (caseStatus === "COMPLETED") await syncCompletedInvoice(id, tx);
       await tx.auditLog.create({ data: auditData(actor, { action: "CASE_PART_UPDATED", entityType: "CASE", entityId: id, entityLabel: existing.name, details: { qty, unit_price_cents } }) });
       return updated;
     });
@@ -141,7 +153,8 @@ export async function DELETE(
   const userId = await requireAuth();
   if (!userId) return unauthorizedResponse();
   const { id } = await params;
-  const accessError = editAccessError(await checkCase(id, userId));
+  const caseStatus = await checkCase(id, userId);
+  const accessError = editAccessError(caseStatus);
   if (accessError) return accessError;
   const { searchParams } = new URL(req.url);
   const partId = searchParams.get("id");
@@ -160,8 +173,12 @@ export async function DELETE(
         casePartId: existing.id,
       });
     }
+    if (caseStatus === "COMPLETED" && existing.inventory_item_id) {
+      await changeCompletedConsumption(tx, { itemId: existing.inventory_item_id, delta: -existing.qty, userId, casePartId: existing.id, unitCostCents: existing.unit_cost_snapshot_cents });
+    }
     await tx.casePart.delete({ where: { id: partId } });
     await recalcTotals(id, tx);
+    if (caseStatus === "COMPLETED") await syncCompletedInvoice(id, tx);
     await tx.auditLog.create({ data: auditData(actor, { action: "CASE_PART_DELETED", entityType: "CASE", entityId: id, entityLabel: existing.name, details: { qty: existing.qty } }) });
   });
   return Response.json({ ok: true });

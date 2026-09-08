@@ -26,6 +26,7 @@ enum StockMovementType {
   CASE_RESERVE
   CASE_RELEASE
   CASE_CONSUMPTION
+  CASE_RETURN
   COUNT_ADJUSTMENT
   MANUAL_ADJUSTMENT
 }
@@ -155,6 +156,7 @@ model InventoryItem {
   default_sale_price_cents Int      @default(0)
   reorder_level            Int      @default(0)
   is_active                Boolean  @default(true)
+  image_data_url           String?
 
   purchase_lines PurchaseOrderLine[]
   case_parts     CasePart[]

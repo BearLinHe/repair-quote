@@ -5,6 +5,7 @@ import { requireAuth, unauthorizedResponse } from "@/lib/auth";
 import { apiError } from "@/lib/api-error";
 import { canEditCaseDetails } from "@/lib/case-rules";
 import { auditData, getAuditActor } from "@/lib/audit";
+import { syncCompletedInvoice } from "@/lib/invoice-record";
 
 async function checkCase(id: string, userId: string) {
   const c = await prisma.case.findUnique({ where: { id }, select: { clerk_user_id: true, status: true } });
@@ -13,7 +14,7 @@ async function checkCase(id: string, userId: string) {
 
 function editAccessError(status: Awaited<ReturnType<typeof checkCase>>) {
   if (!status) return apiError("CASE_NOT_FOUND", "维修单不存在", 404);
-  if (!canEditCaseDetails(status)) return apiError("CASE_READ_ONLY", "维修单仅在进行中可以修改", 409);
+  if (!canEditCaseDetails(status)) return apiError("CASE_READ_ONLY", "已取消的维修单不能修改", 409);
   return null;
 }
 
@@ -27,7 +28,8 @@ export async function POST(
   const userId = await requireAuth();
   if (!userId) return unauthorizedResponse();
   const { id } = await params;
-  const accessError = editAccessError(await checkCase(id, userId));
+  const caseStatus = await checkCase(id, userId);
+  const accessError = editAccessError(caseStatus);
   if (accessError) return accessError;
   const body = await req.json();
   const parsed = createSchema.safeParse(body);
@@ -45,6 +47,7 @@ export async function POST(
       sort_order: parsed.data.sort_order ?? (maxOrder?.sort_order ?? -1) + 1,
     } });
     await tx.auditLog.create({ data: auditData(actor, { action: "CASE_REPAIR_ITEM_ADDED", entityType: "CASE", entityId: id, entityLabel: created.name }) });
+    if (caseStatus === "COMPLETED") await syncCompletedInvoice(id, tx);
     return created;
   });
   return Response.json(item);
@@ -57,7 +60,8 @@ export async function PUT(
   const userId = await requireAuth();
   if (!userId) return unauthorizedResponse();
   const { id } = await params;
-  const accessError = editAccessError(await checkCase(id, userId));
+  const caseStatus = await checkCase(id, userId);
+  const accessError = editAccessError(caseStatus);
   if (accessError) return accessError;
   const body = await req.json();
   const itemId = body.id as string | undefined;
@@ -75,6 +79,7 @@ export async function PUT(
       ...(parsed.data.sort_order !== undefined && { sort_order: parsed.data.sort_order }),
     } });
     await tx.auditLog.create({ data: auditData(actor, { action: "CASE_REPAIR_ITEM_UPDATED", entityType: "CASE", entityId: id, entityLabel: updated.name }) });
+    if (caseStatus === "COMPLETED") await syncCompletedInvoice(id, tx);
     return updated;
   });
   return Response.json(item);
@@ -87,7 +92,8 @@ export async function DELETE(
   const userId = await requireAuth();
   if (!userId) return unauthorizedResponse();
   const { id } = await params;
-  const accessError = editAccessError(await checkCase(id, userId));
+  const caseStatus = await checkCase(id, userId);
+  const accessError = editAccessError(caseStatus);
   if (accessError) return accessError;
   const { searchParams } = new URL(req.url);
   const itemId = searchParams.get("id");
@@ -99,6 +105,7 @@ export async function DELETE(
   const actor = await getAuditActor(userId);
   await prisma.$transaction(async (tx) => {
     await tx.caseRepairItem.delete({ where: { id: itemId } });
+    if (caseStatus === "COMPLETED") await syncCompletedInvoice(id, tx);
     await tx.auditLog.create({ data: auditData(actor, { action: "CASE_REPAIR_ITEM_DELETED", entityType: "CASE", entityId: id, entityLabel: existing.name }) });
   });
   return Response.json({ ok: true });

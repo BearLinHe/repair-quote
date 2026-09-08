@@ -6,6 +6,7 @@ import { requireAuth, unauthorizedResponse } from "@/lib/auth";
 import { recalcTotals } from "@/lib/recalc";
 import { apiError } from "@/lib/api-error";
 import { auditData, getAuditActor } from "@/lib/audit";
+import { syncCompletedInvoice } from "@/lib/invoice-record";
 
 const draftSchema = z.object({
   active_tab: z.enum(["items", "parts", "labor", "summary"]).optional(),
@@ -76,7 +77,7 @@ export async function PATCH(
     select: { clerk_user_id: true, status: true },
   });
   if (!c || c.clerk_user_id !== userId) return apiError("CASE_NOT_FOUND", "维修单不存在", 404);
-  if (c.status === "CANCELED" || c.status === "COMPLETED") {
+  if (c.status === "CANCELED") {
     return apiError("CASE_READ_ONLY", "该维修单已结束，不能继续修改", 409);
   }
   const body = await req.json().catch(() => ({}));
@@ -118,6 +119,7 @@ export async function PATCH(
   await prisma.$transaction(async (tx) => {
     await tx.case.update({ where: { id }, data });
     if (shouldRecalculate) await recalcTotals(id, tx);
+    if (c.status === "COMPLETED") await syncCompletedInvoice(id, tx);
     if (updatedBillTo && actor) {
       await tx.auditLog.create({
         data: auditData(actor, {

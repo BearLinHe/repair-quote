@@ -115,3 +115,38 @@ export async function consumeReservation(
   });
   return item.avg_cost_cents;
 }
+
+export async function changeCompletedConsumption(
+  db: Prisma.TransactionClient,
+  input: { itemId: string; delta: number; userId: string; casePartId: string; unitCostCents?: number },
+) {
+  if (input.delta === 0) return input.unitCostCents ?? 0;
+  const item = await lockItem(db, input.itemId);
+  if (!item || item.clerk_user_id !== input.userId || !item.is_active) throw new Error("INVENTORY_ITEM_NOT_FOUND");
+  if (input.delta > 0 && availableQuantity(item.on_hand_qty, item.reserved_qty) < input.delta) {
+    throw new Error("INSUFFICIENT_INVENTORY");
+  }
+  const unitCost = input.unitCostCents ?? item.avg_cost_cents;
+  const returnedQty = input.delta < 0 ? Math.abs(input.delta) : 0;
+  const nextAverageCost = returnedQty > 0
+    ? weightedAverageCost(item.on_hand_qty, item.avg_cost_cents, returnedQty, unitCost)
+    : item.avg_cost_cents;
+  await db.inventoryItem.update({
+    where: { id: item.id },
+    data: { on_hand_qty: { increment: -input.delta }, avg_cost_cents: nextAverageCost },
+  });
+  await db.stockMovement.create({
+    data: {
+      clerk_user_id: input.userId,
+      inventory_item_id: item.id,
+      type: input.delta > 0 ? "CASE_CONSUMPTION" : "CASE_RETURN",
+      qty_change: -input.delta,
+      unit_cost_cents: unitCost,
+      total_cost_cents: unitCost * Math.abs(input.delta),
+      reference_type: "CASE_PART",
+      reference_id: input.casePartId,
+      note: input.delta > 0 ? "已完成维修单追加用量" : "已完成维修单退回库存",
+    },
+  });
+  return unitCost;
+}

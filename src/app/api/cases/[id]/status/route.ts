@@ -7,6 +7,7 @@ import { canTransitionCase } from "@/lib/case-rules";
 import { apiError } from "@/lib/api-error";
 import { changeReservation, consumeReservation } from "@/lib/inventory";
 import { auditData, getAuditActor } from "@/lib/audit";
+import { syncCompletedInvoice } from "@/lib/invoice-record";
 
 const bodySchema = z.object({
   to_status: z.enum(["SUBMITTED", "IN_PROGRESS", "CANCELED", "COMPLETED"]),
@@ -65,38 +66,6 @@ export async function POST(
           part.cost_total_cents = actualCost * part.qty;
           part.reservation_active = false;
         }
-        const partsCost = fullCase.parts.reduce((sum, part) => sum + part.cost_total_cents, 0);
-        await tx.invoiceRecord.create({
-          data: {
-            clerk_user_id: userId,
-            case_id: fullCase.id,
-            invoice_number: fullCase.invoice_number,
-            parts_revenue_cents: fullCase.parts_subtotal_cents,
-            labor_revenue_cents: fullCase.labor_subtotal_cents,
-            cleaning_fee_cents: fullCase.cleaning_fee_cents,
-            tax_cents: fullCase.tax_cents,
-            grand_total_cents: fullCase.grand_total_cents,
-            parts_cost_cents: partsCost,
-            snapshot: JSON.parse(JSON.stringify({
-              invoice_number: fullCase.invoice_number,
-              plate: fullCase.plate,
-              vin: fullCase.vin,
-              unit_number: fullCase.unit_number,
-              customer_name: fullCase.customer_name,
-              repair_items: fullCase.repair_items,
-              parts: fullCase.parts,
-              labor: fullCase.labor.map((labor) => ({ ...labor, hours: Number(labor.hours) })),
-              totals: {
-                parts_subtotal_cents: fullCase.parts_subtotal_cents,
-                labor_subtotal_cents: fullCase.labor_subtotal_cents,
-                cleaning_fee_cents: fullCase.cleaning_fee_cents,
-                tax_cents: fullCase.tax_cents,
-                grand_total_cents: fullCase.grand_total_cents,
-                parts_cost_cents: partsCost,
-              },
-            })),
-          },
-        });
       } else if (to_status === "CANCELED") {
         for (const part of fullCase.parts) {
           if (!part.inventory_item_id || !part.reservation_active) continue;
@@ -119,6 +88,7 @@ export async function POST(
             : {}),
         },
       });
+      if (to_status === "COMPLETED") await syncCompletedInvoice(id, tx);
       await tx.caseStatusLog.create({
       data: {
         case_id: id,

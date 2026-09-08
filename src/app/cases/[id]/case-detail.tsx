@@ -92,6 +92,7 @@ type InventoryOption = {
   available_qty: number;
   default_sale_price_cents: number;
   is_active: boolean;
+  image_data_url: string | null;
 };
 
 async function requestJson<T>(url: string, init?: RequestInit): Promise<T> {
@@ -508,17 +509,17 @@ export function CaseDetail({ caseData }: { caseData: CaseData }) {
         <CardContent className="grid gap-5 p-5 text-sm sm:grid-cols-2 sm:p-6 lg:grid-cols-[1fr_1fr_1.5fr_auto] lg:items-end">
           <div className="grid gap-2">
             <label className="text-xs font-medium uppercase tracking-wide text-muted-foreground">公司名称 *</label>
-            <Input value={billToCompany} onChange={(event) => setBillToCompany(event.target.value)} disabled={isFinal} />
+            <Input value={billToCompany} onChange={(event) => setBillToCompany(event.target.value)} disabled={status === "CANCELED"} />
           </div>
           <div className="grid gap-2">
             <label className="text-xs font-medium uppercase tracking-wide text-muted-foreground">负责人</label>
-            <Input value={billToContact} onChange={(event) => setBillToContact(event.target.value)} disabled={isFinal} />
+            <Input value={billToContact} onChange={(event) => setBillToContact(event.target.value)} disabled={status === "CANCELED"} />
           </div>
           <div className="grid gap-2">
             <label className="text-xs font-medium uppercase tracking-wide text-muted-foreground">地址</label>
-            <Input value={billToAddress} onChange={(event) => setBillToAddress(event.target.value)} disabled={isFinal} />
+            <Input value={billToAddress} onChange={(event) => setBillToAddress(event.target.value)} disabled={status === "CANCELED"} />
           </div>
-          {!isFinal && <Button onClick={saveBillTo} disabled={loading || !billToCompany.trim()}>保存</Button>}
+          {status !== "CANCELED" && <Button onClick={saveBillTo} disabled={loading || !billToCompany.trim()}>保存</Button>}
         </CardContent>
       </Card>
 
@@ -704,7 +705,7 @@ export function CaseDetail({ caseData }: { caseData: CaseData }) {
                 <SelectContent>
                   {inventory.map((item) => (
                     <SelectItem key={item.id} value={item.id} disabled={item.available_qty <= 0}>
-                      {item.sku} · {item.name}（可用 {item.available_qty} {item.unit}）
+                      <span className="flex items-center gap-2">{item.image_data_url ? <img src={item.image_data_url} alt="" className="size-7 rounded-md object-cover" /> : <span className="size-7 rounded-md bg-muted" />}<span>{item.sku} · {item.name}（可用 {item.available_qty} {item.unit}）</span></span>
                     </SelectItem>
                   ))}
                 </SelectContent>
