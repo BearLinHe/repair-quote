@@ -104,8 +104,8 @@ export function CaseList() {
           onChange={(e) => setQuery(e.target.value)}
         />
       </div>
-      <div className="flex gap-1 overflow-x-auto rounded-xl bg-muted/70 p-1">
-        {[["ALL","全部"],["SUBMITTED","已提交"],["IN_PROGRESS","进行中"],["COMPLETED","已完成"],["CANCELED","已取消"]].map(([value, label]) => <button key={value} onClick={() => setStatusFilter(value)} className={`min-h-9 whitespace-nowrap rounded-lg px-3 text-xs font-semibold transition-all ${statusFilter === value ? "bg-card text-primary shadow-sm" : "text-muted-foreground hover:text-foreground"}`}>{label}</button>)}
+      <div className="grid grid-cols-5 gap-1 rounded-xl bg-muted/70 p-1 sm:flex sm:overflow-x-auto">
+        {[["ALL","全部"],["SUBMITTED","已提交"],["IN_PROGRESS","进行中"],["COMPLETED","已完成"],["CANCELED","已取消"]].map(([value, label]) => <button key={value} onClick={() => setStatusFilter(value)} className={`min-h-9 min-w-0 whitespace-nowrap rounded-lg px-1 text-[11px] font-semibold transition-all sm:px-3 sm:text-xs ${statusFilter === value ? "bg-card text-primary shadow-sm" : "text-muted-foreground hover:text-foreground"}`}>{label}</button>)}
       </div>
       </div>
       {loading ? (

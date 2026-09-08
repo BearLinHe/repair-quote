@@ -225,8 +225,8 @@ export default function InventoryPage() {
 
       <div className="surface-panel flex flex-col gap-3 p-3 sm:flex-row sm:items-center sm:p-4">
         <div className="relative min-w-0 flex-1"><Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" /><Input className="pl-9" placeholder="搜索 SKU、名称或分类" value={query} onChange={(event) => setQuery(event.target.value)} /></div>
-        <div className="flex gap-1 overflow-x-auto rounded-xl bg-muted/70 p-1">
-          {[["ALL", "全部"], ["LOW", "低库存"], ["RESERVED", "有预留"], ["INACTIVE", "已停用"]].map(([value, label]) => <button key={value} onClick={() => setFilter(value as InventoryFilter)} className={`min-h-9 whitespace-nowrap rounded-lg px-3 text-xs font-semibold transition-all ${filter === value ? "bg-card text-primary shadow-sm" : "text-muted-foreground hover:text-foreground"}`}>{label}</button>)}
+        <div className="grid grid-cols-4 gap-1 rounded-xl bg-muted/70 p-1 sm:flex sm:overflow-x-auto">
+          {[["ALL", "全部"], ["LOW", "低库存"], ["RESERVED", "有预留"], ["INACTIVE", "已停用"]].map(([value, label]) => <button key={value} onClick={() => setFilter(value as InventoryFilter)} className={`min-h-9 min-w-0 whitespace-nowrap rounded-lg px-1 text-[11px] font-semibold transition-all sm:px-3 sm:text-xs ${filter === value ? "bg-card text-primary shadow-sm" : "text-muted-foreground hover:text-foreground"}`}>{label}</button>)}
         </div>
       </div>
 

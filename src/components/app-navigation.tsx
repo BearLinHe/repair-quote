@@ -18,7 +18,6 @@ export function AppNavigation() {
   const isActive = (matches: string[]) => matches.some((value) => pathname.startsWith(value));
 
   return (
-    <>
       <nav className="hidden items-center gap-1 rounded-2xl bg-muted/45 p-1.5 lg:flex" aria-label="主要导航">
         {links.map(({ href, label, icon: Icon, match }) => {
           const active = isActive(match);
@@ -41,7 +40,14 @@ export function AppNavigation() {
           );
         })}
       </nav>
+  );
+}
 
+export function MobileNavigation() {
+  const pathname = usePathname();
+  const isActive = (matches: string[]) => matches.some((value) => pathname.startsWith(value));
+
+  return (
       <nav className="fixed inset-x-0 bottom-0 z-40 grid grid-cols-5 border-t border-border/80 bg-card/95 px-[max(8px,env(safe-area-inset-left))] pb-[max(7px,env(safe-area-inset-bottom))] pt-1.5 shadow-[0_-8px_30px_rgba(0,0,0,0.08)] backdrop-blur-xl lg:hidden" aria-label="手机导航">
         {links.map(({ href, shortLabel, icon: Icon, match }) => {
           const active = isActive(match);
@@ -61,6 +67,5 @@ export function AppNavigation() {
           );
         })}
       </nav>
-    </>
   );
 }

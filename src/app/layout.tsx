@@ -9,7 +9,7 @@ import {
 } from "@clerk/nextjs";
 import Link from "next/link";
 import { Wrench } from "lucide-react";
-import { AppNavigation } from "@/components/app-navigation";
+import { AppNavigation, MobileNavigation } from "@/components/app-navigation";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -64,6 +64,7 @@ export default function RootLayout({
             </div>
           </header>
           <main className="min-h-[calc(100vh-64px)] pb-24 sm:min-h-[calc(100vh-76px)] lg:pb-0">{children}</main>
+          <SignedIn><MobileNavigation /></SignedIn>
         </body>
       </html>
     </ClerkProvider>
