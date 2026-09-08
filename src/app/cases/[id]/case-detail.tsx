@@ -769,7 +769,7 @@ export function CaseDetail({ caseData }: { caseData: CaseData }) {
             </div>
           )}
           <div className="-mx-1 overflow-x-auto rounded-lg border border-border px-1 sm:mx-0 sm:px-0">
-            <table className="w-full min-w-[680px] table-fixed text-sm">
+            <table className="responsive-line-table w-full table-fixed text-sm sm:min-w-[680px]">
               <colgroup>
                 <col className="w-[34%]" />
                 <col className="w-[22%]" />
@@ -877,7 +877,7 @@ export function CaseDetail({ caseData }: { caseData: CaseData }) {
           </div>
           )}
           <div className="-mx-1 overflow-x-auto rounded-lg border border-border px-1 sm:mx-0 sm:px-0">
-            <table className="w-full min-w-[680px] table-fixed text-sm">
+            <table className="responsive-line-table w-full table-fixed text-sm sm:min-w-[680px]">
               <colgroup>
                 <col className="w-[34%]" />
                 <col className="w-[22%]" />
@@ -991,17 +991,17 @@ function PartRow({
   if (readOnly) {
     return (
       <tr className="border-b">
-        <td className="p-2 sm:p-3">{part.name}</td>
-        <td className="p-2 sm:p-3 text-right">{formatCents(part.unit_price_cents)}</td>
-        <td className="p-2 sm:p-3 text-right">{part.qty}</td>
-        <td className="p-2 sm:p-3 text-right">{formatCents(part.line_total_cents)}</td>
+        <td data-label="名称" className="p-2 sm:p-3">{part.name}</td>
+        <td data-label="单价" className="p-2 sm:p-3 text-right">{formatCents(part.unit_price_cents)}</td>
+        <td data-label="数量" className="p-2 sm:p-3 text-right">{part.qty}</td>
+        <td data-label="小计" className="p-2 sm:p-3 text-right">{formatCents(part.line_total_cents)}</td>
       </tr>
     );
   }
   return (
     <tr className="border-b hover:bg-muted/20">
-      <td className="p-2 text-left font-medium sm:p-3">{part.name}</td>
-      <td className="p-2 sm:p-3">
+      <td data-label="名称" className="p-2 text-left font-medium sm:p-3">{part.name}</td>
+      <td data-label="单价" className="p-2 sm:p-3">
         <Input
           type="number"
           step={0.01}
@@ -1011,7 +1011,7 @@ function PartRow({
           className="ml-auto min-h-[40px] w-20 text-right sm:min-h-[32px] sm:w-24"
         />
       </td>
-      <td className="p-2 text-right sm:p-3">
+      <td data-label="数量" className="p-2 text-right sm:p-3">
         <Input
           type="number"
           min={1}
@@ -1021,8 +1021,8 @@ function PartRow({
           className="ml-auto min-h-[40px] w-16 text-right sm:min-h-[32px] sm:w-20"
         />
       </td>
-      <td className="p-2 sm:p-3 text-right align-middle">{formatCents(part.line_total_cents)}</td>
-      <td className="p-2 text-right sm:p-3">
+      <td data-label="小计" className="p-2 sm:p-3 text-right align-middle">{formatCents(part.line_total_cents)}</td>
+      <td data-label="操作" className="p-2 text-right sm:p-3">
         <Button variant="destructive" size="sm" onClick={onDelete} className="min-h-[40px] sm:min-h-[32px]">
           删除
         </Button>
@@ -1058,16 +1058,16 @@ function LaborRow({
   if (readOnly) {
     return (
       <tr className="border-b">
-        <td className="p-2 sm:p-3">{labor.name}</td>
-        <td className="p-2 sm:p-3 text-right">{formatCents(labor.rate_cents)}</td>
-        <td className="p-2 sm:p-3 text-right">{labor.hours}</td>
-        <td className="p-2 sm:p-3 text-right">{formatCents(labor.line_total_cents)}</td>
+        <td data-label="名称" className="p-2 sm:p-3">{labor.name}</td>
+        <td data-label="费率" className="p-2 sm:p-3 text-right">{formatCents(labor.rate_cents)}</td>
+        <td data-label="小时" className="p-2 sm:p-3 text-right">{labor.hours}</td>
+        <td data-label="小计" className="p-2 sm:p-3 text-right">{formatCents(labor.line_total_cents)}</td>
       </tr>
     );
   }
   return (
     <tr className="border-b hover:bg-muted/20">
-      <td className="p-2 text-right sm:p-3">
+      <td data-label="名称" className="p-2 text-right sm:p-3">
         <Input
           value={name}
           onChange={(e) => setName(e.target.value)}
@@ -1075,7 +1075,7 @@ function LaborRow({
           className="min-h-[40px] sm:min-h-[32px] w-full max-w-[160px]"
         />
       </td>
-      <td className="p-2 sm:p-3">
+      <td data-label="费率" className="p-2 sm:p-3">
         <Input
           type="number"
           step={0.01}
@@ -1085,7 +1085,7 @@ function LaborRow({
           className="ml-auto min-h-[40px] w-20 text-right sm:min-h-[32px] sm:w-24"
         />
       </td>
-      <td className="p-2 text-right sm:p-3">
+      <td data-label="小时" className="p-2 text-right sm:p-3">
         <Input
           type="number"
           step={0.25}
@@ -1095,8 +1095,8 @@ function LaborRow({
           className="ml-auto min-h-[40px] w-16 text-right sm:min-h-[32px] sm:w-20"
         />
       </td>
-      <td className="p-2 sm:p-3 text-right align-middle">{formatCents(labor.line_total_cents)}</td>
-      <td className="p-2 text-right sm:p-3">
+      <td data-label="小计" className="p-2 sm:p-3 text-right align-middle">{formatCents(labor.line_total_cents)}</td>
+      <td data-label="操作" className="p-2 text-right sm:p-3">
         <Button variant="destructive" size="sm" onClick={onDelete} className="min-h-[40px] sm:min-h-[32px]">
           删除
         </Button>

@@ -34,9 +34,9 @@ export default function RootLayout({
       <html lang="zh-CN">
         <body className="min-h-screen bg-background font-sans antialiased">
           <header className="sticky top-0 z-30 border-b border-border/80 bg-card/90 backdrop-blur-xl supports-[backdrop-filter]:bg-card/80">
-            <div className="mx-auto flex min-h-[76px] w-full max-w-[2048px] items-center gap-4 px-4 sm:px-6 lg:px-8 xl:px-10 2xl:px-12">
+            <div className="mx-auto flex min-h-16 w-full max-w-[2048px] items-center gap-4 px-4 sm:min-h-[76px] sm:px-6 lg:px-8 xl:px-10 2xl:px-12">
               <Link href="/dashboard" className="group flex min-w-0 items-center gap-3" aria-label="YaoYuan 维修管理首页">
-                <span className="relative flex size-11 shrink-0 items-center justify-center overflow-hidden rounded-2xl border border-primary/35 bg-[linear-gradient(145deg,color-mix(in_srgb,var(--primary)_88%,white),color-mix(in_srgb,var(--primary)_72%,black))] text-white shadow-[0_10px_26px_color-mix(in_srgb,var(--primary)_24%,transparent)] transition-transform group-hover:-rotate-2 group-hover:scale-[1.03]">
+                <span className="relative flex size-10 shrink-0 items-center justify-center overflow-hidden rounded-xl border border-primary/35 bg-[linear-gradient(145deg,color-mix(in_srgb,var(--primary)_88%,white),color-mix(in_srgb,var(--primary)_72%,black))] text-white shadow-[0_10px_26px_color-mix(in_srgb,var(--primary)_24%,transparent)] transition-transform group-hover:-rotate-2 group-hover:scale-[1.03] sm:size-11 sm:rounded-2xl">
                   <span className="absolute -right-3 -top-3 size-8 rounded-full border border-white/25" />
                   <span className="absolute -bottom-3 -left-2 size-7 rounded-full bg-black/10" />
                   <Wrench className="relative size-5 stroke-[2.2]" />
@@ -63,7 +63,7 @@ export default function RootLayout({
               </div>
             </div>
           </header>
-          <main className="min-h-[calc(100vh-76px)] pb-20 lg:pb-0">{children}</main>
+          <main className="min-h-[calc(100vh-64px)] pb-24 sm:min-h-[calc(100vh-76px)] lg:pb-0">{children}</main>
         </body>
       </html>
     </ClerkProvider>

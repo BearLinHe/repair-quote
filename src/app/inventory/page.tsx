@@ -230,7 +230,24 @@ export default function InventoryPage() {
         </div>
       </div>
 
-      <div className="surface-panel overflow-x-auto">
+      <div className="space-y-3 sm:hidden">
+        {visibleItems.map((item) => (
+          <button key={item.id} type="button" onClick={() => openItem(item)} className="surface-panel w-full p-4 text-left active:scale-[0.99]">
+            <div className="flex items-start gap-3">
+              <div className="flex size-14 shrink-0 items-center justify-center overflow-hidden rounded-xl border bg-muted">
+                {item.image_data_url ? <img src={item.image_data_url} alt={item.name} className="h-full w-full object-cover" /> : <Boxes className="size-5 text-muted-foreground" />}
+              </div>
+              <div className="min-w-0 flex-1">
+                <div className="flex items-start justify-between gap-2"><div className="min-w-0"><p className="truncate font-semibold">{item.name}</p><p className="truncate font-mono text-xs text-muted-foreground">{item.sku} · {item.unit}</p></div><span className={`shrink-0 text-xs font-semibold ${!item.is_active ? "text-muted-foreground" : item.is_low_stock ? "text-red-600" : "text-emerald-700"}`}>{!item.is_active ? "停用" : item.is_low_stock ? "低库存" : "正常"}</span></div>
+                <div className="mt-3 grid grid-cols-3 gap-2 border-t pt-3 text-center"><div><p className="text-[11px] text-muted-foreground">现有</p><p className="font-semibold tabular-nums">{item.on_hand_qty}</p></div><div><p className="text-[11px] text-muted-foreground">可用</p><p className="font-semibold tabular-nums">{item.available_qty}</p></div><div><p className="text-[11px] text-muted-foreground">库存价值</p><p className="font-semibold tabular-nums">{formatCents(item.inventory_value_cents)}</p></div></div>
+              </div>
+            </div>
+          </button>
+        ))}
+        {visibleItems.length === 0 && <div className="surface-panel p-10 text-center text-sm text-muted-foreground">当前筛选下没有库存商品</div>}
+      </div>
+
+      <div className="surface-panel hidden overflow-x-auto sm:block">
         <table className="data-table w-full min-w-[1050px] text-sm">
           <thead><tr className="border-b text-left"><th className="p-4">SKU / 商品</th><th className="p-4">分类</th><th className="p-4 text-right">现有</th><th className="p-4 text-right">预留</th><th className="p-4 text-right">可用</th><th className="p-4 text-right">平均成本</th><th className="p-4 text-right">库存价值</th><th className="p-4">状态</th><th className="p-4" /></tr></thead>
           <tbody>
@@ -241,9 +258,9 @@ export default function InventoryPage() {
       </div>
 
       {selected && (
-        <div className="fixed inset-0 z-[80] flex items-center justify-center p-4 sm:p-6" role="dialog" aria-modal="true" aria-label={`${selected.name} 库存管理`}>
+        <div className="fixed inset-0 z-[80] flex items-center justify-center p-0 sm:p-6" role="dialog" aria-modal="true" aria-label={`${selected.name} 库存管理`}>
           <button className="absolute inset-0 bg-black/65 backdrop-blur-sm" aria-label="关闭库存管理" onClick={() => setSelected(null)} />
-          <div className="relative flex max-h-[92vh] w-full max-w-5xl flex-col overflow-hidden rounded-3xl border bg-card shadow-2xl">
+          <div className="relative flex h-[100dvh] max-h-none w-full max-w-5xl flex-col overflow-hidden border bg-card shadow-2xl sm:h-auto sm:max-h-[92vh] sm:rounded-3xl">
             <div className="flex items-start justify-between gap-4 border-b p-5 sm:p-6"><div><p className="font-mono text-xs font-semibold text-primary">{selected.sku}</p><h2 className="mt-1 text-2xl font-bold">{selected.name}</h2><p className="mt-1 text-sm text-muted-foreground">现有 {selected.on_hand_qty} {selected.unit} · 预留 {selected.reserved_qty} · 可用 {selected.available_qty}</p></div><button className="flex size-10 items-center justify-center rounded-xl text-muted-foreground hover:bg-muted hover:text-foreground" onClick={() => setSelected(null)} aria-label="关闭"><X className="size-4" /></button></div>
             <div className="flex gap-1 overflow-x-auto border-b bg-muted/30 p-2 sm:px-6">
               {[["maintenance", "资料维护", Settings2], ["count", "库存盘点", ClipboardCheck], ["movements", "库存流水", History]].map(([value, label, Icon]) => <button key={value as string} onClick={() => setDetailTab(value as DetailTab)} className={`inline-flex min-h-10 items-center gap-2 whitespace-nowrap rounded-xl px-4 text-sm font-semibold ${detailTab === value ? "bg-card text-primary shadow-sm" : "text-muted-foreground hover:text-foreground"}`}><Icon className="size-4" />{label as string}</button>)}
@@ -259,9 +276,9 @@ export default function InventoryPage() {
       )}
 
       {inboundOpen && (
-        <div className="fixed inset-0 z-[80] flex items-center justify-center p-4 sm:p-6" role="dialog" aria-modal="true" aria-label="其他入库">
+        <div className="fixed inset-0 z-[80] flex items-center justify-center p-0 sm:p-6" role="dialog" aria-modal="true" aria-label="其他入库">
           <button className="absolute inset-0 bg-black/65 backdrop-blur-sm" aria-label="关闭其他入库" onClick={() => setInboundOpen(false)} />
-          <div className="relative max-h-[92vh] w-full max-w-4xl overflow-y-auto rounded-3xl border bg-card shadow-2xl">
+          <div className="relative h-[100dvh] max-h-none w-full max-w-4xl overflow-y-auto border bg-card shadow-2xl sm:h-auto sm:max-h-[92vh] sm:rounded-3xl">
             <div className="flex items-center justify-between gap-4 border-b p-5 sm:p-6"><div className="flex items-center gap-3"><span className="flex size-10 items-center justify-center rounded-xl bg-primary/10 text-primary"><Boxes className="size-5" /></span><h2 className="text-xl font-bold">其他入库</h2></div><button className="flex size-10 items-center justify-center rounded-xl text-muted-foreground hover:bg-muted" onClick={() => setInboundOpen(false)} aria-label="关闭"><X className="size-4" /></button></div>
             <div className="space-y-5 p-5 sm:p-6">
               {error && <div className="rounded-xl border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive">{error}</div>}

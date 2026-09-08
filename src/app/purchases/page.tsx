@@ -255,9 +255,9 @@ export default function PurchasesPage() {
       </Card>
 
       {newItemForLine !== null && (
-        <div className="fixed inset-0 z-[80] flex items-center justify-center p-4 sm:p-6" role="dialog" aria-modal="true" aria-label="创建新零件">
+        <div className="fixed inset-0 z-[80] flex items-center justify-center p-0 sm:p-6" role="dialog" aria-modal="true" aria-label="创建新零件">
           <button type="button" aria-label="关闭弹窗" className="absolute inset-0 bg-black/65 backdrop-blur-sm" onClick={() => setNewItemForLine(null)} />
-          <div className="relative max-h-[90vh] w-full max-w-3xl overflow-y-auto rounded-3xl border border-border bg-card shadow-2xl">
+          <div className="relative h-[100dvh] max-h-none w-full max-w-3xl overflow-y-auto border border-border bg-card shadow-2xl sm:h-auto sm:max-h-[90vh] sm:rounded-3xl">
             <div className="flex items-start justify-between gap-4 border-b p-5 sm:p-6">
               <div className="flex items-center gap-3"><span className="flex size-10 items-center justify-center rounded-xl bg-primary/10 text-primary"><PackagePlus className="size-5" /></span><h2 className="text-xl font-bold">新建零件</h2></div>
               <button type="button" aria-label="关闭新增零件" onClick={() => setNewItemForLine(null)} className="flex size-10 shrink-0 items-center justify-center rounded-xl text-muted-foreground hover:bg-muted hover:text-foreground"><X className="size-4" /></button>
@@ -285,7 +285,19 @@ export default function PurchasesPage() {
           <span className="rounded-lg bg-muted px-2.5 py-1 text-xs font-semibold text-muted-foreground">{orders.length}</span>
         </div>
         {orders.length === 0 ? <div className="p-10 text-center text-muted-foreground">暂无采购单</div> : (
-          <div className="overflow-x-auto">
+          <>
+          <div className="divide-y divide-border/70 sm:hidden">
+            {orders.map((order) => (
+              <div key={order.id} className="p-4">
+                <button type="button" onClick={() => setSelectedOrderId(order.id)} className="w-full text-left">
+                  <div className="flex items-start justify-between gap-3"><div className="min-w-0"><p className="truncate font-semibold">{order.supplier}</p><p className="mt-0.5 truncate font-mono text-xs text-muted-foreground">{order.purchase_number}</p></div><p className="shrink-0 text-lg font-bold tabular-nums">{formatCents(order.total_cents)}</p></div>
+                  <div className="mt-3 flex items-center gap-3 text-xs text-muted-foreground"><span>{new Date(order.purchase_date).toLocaleDateString("zh-CN")}</span><span>{order.lines.length} 项零件</span><span className={`ml-auto font-semibold ${order.status === "RECEIVED" ? "text-emerald-700" : order.status === "CANCELED" ? "text-muted-foreground" : "text-amber-700"}`}>{status(order.status)}</span></div>
+                </button>
+                {order.status === "DRAFT" && <div className="mt-3 grid grid-cols-2 gap-2 border-t pt-3"><Button variant="outline" disabled={busy} onClick={() => action(order.id, "cancel")}>取消</Button><Button disabled={busy} onClick={() => action(order.id, "receive")}>确认入库</Button></div>}
+              </div>
+            ))}
+          </div>
+          <div className="hidden overflow-x-auto sm:block">
             <table className="w-full min-w-[940px] text-sm">
               <thead className="border-b border-border/70 bg-muted/35 text-left text-xs font-semibold text-muted-foreground">
                 <tr><th className="px-5 py-3 sm:px-6">供应商 / 采购单</th><th className="px-4 py-3">日期</th><th className="px-4 py-3">状态</th><th className="px-4 py-3 text-right">零件</th><th className="px-4 py-3 text-right">采购总额</th><th className="px-5 py-3 text-right sm:px-6">操作</th></tr>
@@ -304,6 +316,7 @@ export default function PurchasesPage() {
               </tbody>
             </table>
           </div>
+          </>
         )}
       </section>
 
@@ -311,9 +324,9 @@ export default function PurchasesPage() {
         const order = orders.find((item) => item.id === selectedOrderId);
         if (!order) return null;
         return (
-          <div className="fixed inset-0 z-[80] flex items-center justify-center p-4 sm:p-6" role="dialog" aria-modal="true" aria-label="采购单详情">
+          <div className="fixed inset-0 z-[80] flex items-center justify-center p-0 sm:p-6" role="dialog" aria-modal="true" aria-label="采购单详情">
             <button type="button" className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setSelectedOrderId(null)} aria-label="关闭采购单详情" />
-            <div className="relative max-h-[90vh] w-full max-w-4xl overflow-y-auto rounded-3xl border border-border bg-card shadow-2xl">
+            <div className="relative h-[100dvh] max-h-none w-full max-w-4xl overflow-y-auto border border-border bg-card shadow-2xl sm:h-auto sm:max-h-[90vh] sm:rounded-3xl">
               <div className="flex items-start justify-between gap-4 border-b border-border p-5 sm:p-6"><div><div className="flex flex-wrap items-center gap-2.5"><h2 className="text-xl font-bold">{order.supplier}</h2><span className={`inline-flex items-center gap-2 text-sm font-medium ${order.status === "RECEIVED" ? "text-emerald-700 dark:text-emerald-300" : order.status === "CANCELED" ? "text-muted-foreground" : "text-amber-700 dark:text-amber-300"}`}><span className="size-1.5 rounded-full bg-current" />{status(order.status)}</span></div><p className="mt-1 font-mono text-sm text-muted-foreground">{order.purchase_number}</p></div><button type="button" className="flex size-10 shrink-0 items-center justify-center rounded-xl text-muted-foreground hover:bg-muted hover:text-foreground" onClick={() => setSelectedOrderId(null)} aria-label="关闭"><X className="size-4" /></button></div>
               <div className="grid grid-cols-2 gap-4 border-b border-border bg-muted/20 p-5 sm:grid-cols-3 sm:p-6"><div><p className="text-xs text-muted-foreground">采购日期</p><p className="mt-1 font-semibold">{new Date(order.purchase_date).toLocaleDateString("zh-CN")}</p></div><div><p className="text-xs text-muted-foreground">零件数量</p><p className="mt-1 font-semibold">{order.lines.length} 项</p></div><div className="col-span-2 sm:col-span-1 sm:text-right"><p className="text-xs text-muted-foreground">采购总额</p><p className="mt-1 text-2xl font-bold tabular-nums">{formatCents(order.total_cents)}</p></div></div>
               <div className="p-5 sm:p-6"><div className="overflow-hidden rounded-xl border border-border"><div className="hidden grid-cols-[minmax(0,1fr)_100px_170px_160px] gap-4 border-b bg-muted/40 px-4 py-3 text-xs font-semibold text-muted-foreground sm:grid"><span>零件名称</span><span className="text-right">数量</span><span className="text-right">单位成本</span><span className="text-right">小计</span></div><div className="divide-y divide-border/60">{order.lines.map((line) => <div key={line.id} className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 px-4 py-3 text-sm sm:grid-cols-[minmax(0,1fr)_100px_170px_160px] sm:gap-4"><p className="font-medium">{line.name_snapshot}</p><p className="text-right tabular-nums">{line.qty}</p><p className="hidden text-right tabular-nums text-muted-foreground sm:block">{formatCents(line.unit_cost_cents)} / {line.inventory_item?.unit ?? "单位"}</p><p className="hidden text-right font-semibold tabular-nums sm:block">{formatCents(line.qty * line.unit_cost_cents)}</p></div>)}</div></div></div>

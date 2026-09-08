@@ -157,6 +157,77 @@
     .page-shell { padding: 2rem 1.5rem 4rem; }
     .page-hero { padding: 1.75rem 2rem; }
   }
+  @media (max-width: 639px) {
+    .page-shell {
+      padding: 1rem 0.75rem 2rem;
+    }
+    .page-hero {
+      border-radius: 1rem;
+      padding: 1rem;
+    }
+    .page-hero::after {
+      width: 9rem;
+      height: 9rem;
+      right: -4.5rem;
+      top: -5rem;
+    }
+    .page-hero h1 {
+      font-size: 1.65rem;
+      line-height: 2rem;
+    }
+    .surface-panel {
+      border-radius: 1rem;
+      box-shadow: 0 8px 24px color-mix(in srgb, var(--foreground) 4%, transparent);
+    }
+    .mobile-edge-to-edge {
+      margin-inline: -0.75rem;
+      border-left: 0;
+      border-right: 0;
+      border-radius: 0;
+    }
+    .responsive-line-table,
+    .responsive-line-table tbody {
+      display: block;
+    }
+    .responsive-line-table colgroup,
+    .responsive-line-table thead {
+      display: none;
+    }
+    .responsive-line-table tbody tr {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+      gap: 0.75rem;
+      margin: 0.75rem;
+      padding: 0.875rem;
+      border: 1px solid var(--border);
+      border-radius: 0.875rem;
+      background: var(--card);
+    }
+    .responsive-line-table tbody td {
+      display: flex;
+      min-width: 0;
+      flex-direction: column;
+      gap: 0.35rem;
+      padding: 0;
+      text-align: left;
+    }
+    .responsive-line-table tbody td:first-child,
+    .responsive-line-table tbody td:last-child {
+      grid-column: 1 / -1;
+    }
+    .responsive-line-table tbody td::before {
+      content: attr(data-label);
+      color: var(--muted-foreground);
+      font-size: 0.7rem;
+      font-weight: 600;
+    }
+    .responsive-line-table tbody td input,
+    .responsive-line-table tbody td button {
+      width: 100%;
+      max-width: none;
+      margin-left: 0;
+    }
+  }
   @media (min-width: 1024px) {
     .page-shell { padding-inline: 2rem; }
   }
