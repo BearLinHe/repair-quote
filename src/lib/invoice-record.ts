@@ -21,6 +21,7 @@ export async function syncCompletedInvoice(caseId: string, db: Prisma.Transactio
     bill_to_company: repairCase.bill_to_company,
     bill_to_address: repairCase.bill_to_address,
     bill_to_contact: repairCase.bill_to_contact,
+    payment_method: repairCase.payment_method,
     repair_items: repairCase.repair_items,
     parts: repairCase.parts,
     labor: repairCase.labor.map((labor) => ({ ...labor, hours: Number(labor.hours) })),

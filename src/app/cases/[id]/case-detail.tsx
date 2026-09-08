@@ -37,6 +37,7 @@ type CaseData = {
   bill_to_company: string | null;
   bill_to_address: string | null;
   bill_to_contact: string | null;
+  payment_method: string | null;
   status: CaseStatus;
   parts_subtotal_cents: number;
   labor_subtotal_cents: number;
@@ -135,6 +136,7 @@ export function CaseDetail({ caseData }: { caseData: CaseData }) {
   const [billToCompany, setBillToCompany] = useState(caseData.bill_to_company ?? "");
   const [billToAddress, setBillToAddress] = useState(caseData.bill_to_address ?? "");
   const [billToContact, setBillToContact] = useState(caseData.bill_to_contact ?? "");
+  const [paymentMethod, setPaymentMethod] = useState(caseData.payment_method ?? "");
   const [activeTab, setActiveTab] = useState<DraftTab>(initialDraft.active_tab ?? "items");
   const [draftSaveStatus, setDraftSaveStatus] = useState<"idle" | "saving" | "saved" | "error">(
     caseData.draft_updated_at ? "saved" : "idle"
@@ -202,6 +204,7 @@ export function CaseDetail({ caseData }: { caseData: CaseData }) {
           bill_to_company: billToCompany.trim(),
           bill_to_address: billToAddress.trim() || null,
           bill_to_contact: billToContact.trim() || null,
+          payment_method: paymentMethod.trim() || null,
         }),
       });
       await refreshCase();
@@ -506,7 +509,7 @@ export function CaseDetail({ caseData }: { caseData: CaseData }) {
         <CardHeader className="border-b bg-muted/30 p-5 sm:p-6">
           <CardTitle className="text-lg">Bill To</CardTitle>
         </CardHeader>
-        <CardContent className="grid gap-5 p-5 text-sm sm:grid-cols-2 sm:p-6 lg:grid-cols-[1fr_1fr_1.5fr_auto] lg:items-end">
+        <CardContent className="grid gap-5 p-5 text-sm sm:grid-cols-2 sm:p-6 lg:grid-cols-4 lg:items-end">
           <div className="grid gap-2">
             <label className="text-xs font-medium uppercase tracking-wide text-muted-foreground">公司名称 *</label>
             <Input value={billToCompany} onChange={(event) => setBillToCompany(event.target.value)} disabled={status === "CANCELED"} />
@@ -519,7 +522,16 @@ export function CaseDetail({ caseData }: { caseData: CaseData }) {
             <label className="text-xs font-medium uppercase tracking-wide text-muted-foreground">地址</label>
             <Input value={billToAddress} onChange={(event) => setBillToAddress(event.target.value)} disabled={status === "CANCELED"} />
           </div>
-          {status !== "CANCELED" && <Button onClick={saveBillTo} disabled={loading || !billToCompany.trim()}>保存</Button>}
+          <div className="grid gap-2">
+            <label className="text-xs font-medium uppercase tracking-wide text-muted-foreground">付款方式</label>
+            <Input
+              value={paymentMethod}
+              onChange={(event) => setPaymentMethod(event.target.value)}
+              placeholder="现金、支票、Zelle 等"
+              disabled={status === "CANCELED"}
+            />
+          </div>
+          {status !== "CANCELED" && <Button className="sm:col-span-2 sm:justify-self-end lg:col-span-4" onClick={saveBillTo} disabled={loading || !billToCompany.trim()}>保存 Bill To</Button>}
         </CardContent>
       </Card>
 

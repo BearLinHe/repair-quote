@@ -20,6 +20,7 @@ export default function NewCasePage() {
   const [billToCompany, setBillToCompany] = useState("");
   const [billToAddress, setBillToAddress] = useState("");
   const [billToContact, setBillToContact] = useState("");
+  const [paymentMethod, setPaymentMethod] = useState("");
   const [checkInAt, setCheckInAt] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
@@ -50,6 +51,7 @@ export default function NewCasePage() {
           bill_to_company: billToCompany.trim(),
           bill_to_address: billToAddress.trim() || undefined,
           bill_to_contact: billToContact.trim() || undefined,
+          payment_method: paymentMethod.trim() || undefined,
           check_in_at: checkInAt ? new Date(checkInAt).toISOString() : new Date().toISOString(),
         }),
       });
@@ -150,6 +152,16 @@ export default function NewCasePage() {
                     value={billToAddress}
                     onChange={(e) => setBillToAddress(e.target.value)}
                     placeholder="账单地址"
+                    className="min-h-[44px] sm:min-h-[40px]"
+                  />
+                </div>
+                <div className="grid gap-2 sm:col-span-2">
+                  <Label htmlFor="payment-method">付款方式（可选）</Label>
+                  <Input
+                    id="payment-method"
+                    value={paymentMethod}
+                    onChange={(e) => setPaymentMethod(e.target.value)}
+                    placeholder="例如：现金、支票、Zelle 或银行转账"
                     className="min-h-[44px] sm:min-h-[40px]"
                   />
                 </div>

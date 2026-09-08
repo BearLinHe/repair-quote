@@ -61,6 +61,7 @@ export type CasePdfInput = {
   billToCompany: string | null;
   billToAddress: string | null;
   billToContact: string | null;
+  paymentMethod: string | null;
   plate: string | null;
   vin: string | null;
   unit_number: string | null;
@@ -285,6 +286,9 @@ export async function generateCasePdf(input: CasePdfInput): Promise<GenerateCase
         : []),
       ...(input.billToContact
         ? wrapText(`Contact: ${textForPdf(input.billToContact)}`, 445, (value) => measureText(value, 10))
+        : []),
+      ...(input.paymentMethod
+        ? wrapText(`Payment Method: ${textForPdf(input.paymentMethod)}`, 445, (value) => measureText(value, 10))
         : []),
     ];
     const billToHeight = 30 + billToLines.length * smallLine;

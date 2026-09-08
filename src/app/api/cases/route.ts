@@ -65,6 +65,7 @@ const createSchema = z
     bill_to_company: z.string().trim().min(1, "Bill To 公司名称不能为空").max(200),
     bill_to_address: z.string().trim().max(500).optional(),
     bill_to_contact: z.string().trim().max(200).optional(),
+    payment_method: z.string().trim().max(200).optional(),
     check_in_at: z.string().datetime().optional(),
   })
   .refine((d) => (d.plate?.trim() ?? "") !== "" || (d.vin?.trim() ?? "") !== "" || (d.unit_number?.trim() ?? "") !== "", {
@@ -106,6 +107,7 @@ export async function POST(req: NextRequest) {
         bill_to_company: data.bill_to_company,
         bill_to_address: data.bill_to_address || null,
         bill_to_contact: data.bill_to_contact || null,
+        payment_method: data.payment_method || null,
         check_in_at: data.check_in_at ? new Date(data.check_in_at) : new Date(),
         status: "SUBMITTED",
       },

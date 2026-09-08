@@ -53,6 +53,7 @@ model Case {
   bill_to_company      String?
   bill_to_address      String?
   bill_to_contact      String?
+  payment_method       String?
   check_in_at          DateTime?
   status               CaseStatus @default(SUBMITTED)
   parts_subtotal_cents Int        @default(0)

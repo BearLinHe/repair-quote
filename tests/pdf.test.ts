@@ -11,6 +11,7 @@ test("creates additional pages for long invoices", async () => {
     billToCompany: "Example Logistics LLC",
     billToAddress: "100 Market Street, Hayward, CA 94545",
     billToContact: "Jane Doe",
+    paymentMethod: "Company check",
     plate: "TEST-001",
     vin: null,
     unit_number: "A-1",
