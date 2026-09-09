@@ -1,5 +1,6 @@
 import { PDFDocument, StandardFonts, rgb, type PDFFont, type RGB } from "pdf-lib";
 import fontkit from "@pdf-lib/fontkit";
+import subsetFont from "subset-font";
 
 /** 无中文字体时：Helvetica 仅支持 ASCII，非 ASCII 显示为 ?，不翻译 */
 function toPdfSafe(str: string): string {
@@ -104,7 +105,38 @@ export async function generateCasePdf(input: CasePdfInput): Promise<GenerateCase
   if (input.customFontBytes && input.customFontBytes.length > 0) {
     try {
       doc.registerFontkit(fontkit);
-      font = await doc.embedFont(input.customFontBytes);
+      const customCharacters = [
+        input.companyName,
+        input.billToCompany,
+        input.billToAddress,
+        input.billToContact,
+        input.paymentMethod,
+        input.plate,
+        input.vin,
+        input.unit_number,
+        input.driver_name,
+        input.driver_phone,
+        input.status,
+        ...input.repairItems,
+        ...input.parts.map((part) => part.name),
+        ...input.labor.map((labor) => labor.name),
+        "•",
+      ]
+        .filter((value): value is string => Boolean(value))
+        .join("")
+        .replace(/[\x20-\x7E]/g, "");
+
+      let fontBytes = input.customFontBytes;
+      if (customCharacters) {
+        try {
+          fontBytes = new Uint8Array(
+            await subsetFont(Buffer.from(input.customFontBytes), customCharacters, { targetFormat: "sfnt" }),
+          );
+        } catch (error) {
+          console.warn("PDF 中文字体压缩失败，将使用完整字体:", error instanceof Error ? error.message : error);
+        }
+      }
+      font = await doc.embedFont(fontBytes);
       fontBold = font;
       useCustomFont = true;
     } catch (e) {

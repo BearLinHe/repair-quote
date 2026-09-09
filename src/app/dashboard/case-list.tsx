@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { formatCents } from "@/lib/utils";
 import { Button, buttonVariants } from "@/components/ui/button";
-import { CircleDollarSign, ClipboardCheck, Clock3, Files, Inbox, RefreshCw, Search } from "lucide-react";
+import { CircleDollarSign, ClipboardCheck, Clock3, Download, Files, Inbox, RefreshCw, Search } from "lucide-react";
 
 type CaseRow = {
   id: string;
@@ -148,10 +148,9 @@ export function CaseList() {
           {/* 移动端：卡片列表 */}
           <div className="space-y-3 sm:hidden">
             {visibleCases.map((c) => (
-              <Link
+              <div
                 key={c.id}
-                href={`/cases/${c.id}`}
-                className="flex flex-col gap-3 rounded-2xl border border-border/80 bg-card p-4 shadow-sm transition-all active:scale-[0.99] active:bg-muted/40"
+                className="flex flex-col gap-3 rounded-2xl border border-border/80 bg-card p-4 shadow-sm"
               >
                 <div className="flex justify-between items-start">
                   <span className="font-semibold">{c.plate ?? c.vin ?? `车号 ${c.unit_number ?? "-"}`}</span>
@@ -163,9 +162,19 @@ export function CaseList() {
                   <span className="w-full font-mono text-xs text-muted-foreground">Invoice #{c.invoice_number}</span>
                   <span className="font-medium text-foreground">{formatCents(c.grand_total_cents)}</span>
                   <span>{new Date(c.created_at).toLocaleDateString("zh-CN")}</span>
-                  <span className="ml-auto font-medium text-primary">查看详情 →</span>
                 </div>
-              </Link>
+                <div className="grid grid-cols-2 gap-2 border-t pt-3">
+                  <Link href={`/cases/${c.id}`} className={buttonVariants({ variant: "outline", className: c.status === "COMPLETED" ? "" : "col-span-2" })}>
+                    查看详情
+                  </Link>
+                  {c.status === "COMPLETED" && (
+                    <a href={`/api/cases/${c.id}/pdf`} download className={buttonVariants()}>
+                      <Download className="size-4" />
+                      下载 PDF
+                    </a>
+                  )}
+                </div>
+              </div>
             ))}
           </div>
           {/* 桌面端：表格 */}
@@ -197,12 +206,25 @@ export function CaseList() {
                         {new Date(c.created_at).toLocaleDateString("zh-CN")}
                       </td>
                       <td className="px-4 py-4 text-right">
-                        <Link
-                          href={`/cases/${c.id}`}
-                          className="text-primary hover:underline font-medium"
-                        >
-                          详情
-                        </Link>
+                        <div className="flex items-center justify-end gap-2">
+                          {c.status === "COMPLETED" && (
+                            <a
+                              href={`/api/cases/${c.id}/pdf`}
+                              download
+                              className={buttonVariants({ variant: "outline", size: "sm", className: "gap-1.5" })}
+                              aria-label={`下载 Invoice ${c.invoice_number} PDF`}
+                            >
+                              <Download className="size-3.5" />
+                              PDF
+                            </a>
+                          )}
+                          <Link
+                            href={`/cases/${c.id}`}
+                            className="font-medium text-primary hover:underline"
+                          >
+                            详情
+                          </Link>
+                        </div>
                       </td>
                     </tr>
                   ))}

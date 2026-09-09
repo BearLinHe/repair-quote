@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { readFile } from "node:fs/promises";
 import { PDFDocument } from "pdf-lib";
 import { generateCasePdf } from "../src/lib/pdf";
 
@@ -39,4 +40,36 @@ test("creates additional pages for long invoices", async () => {
 
   const document = await PDFDocument.load(pdfBytes);
   assert.ok(document.getPageCount() > 1);
+});
+
+test("subsets the Chinese font instead of embedding the full font file", async () => {
+  const customFontBytes = new Uint8Array(await readFile("public/fonts/NotoSerifSC-Medium.ttf"));
+  const { pdfBytes, usedCustomFont } = await generateCasePdf({
+    companyName: "YaoYuan Inc.",
+    invoiceNumber: "2026090912345678",
+    date: new Date("2026-09-09T12:00:00Z"),
+    billToCompany: "华运物流 / Huayun Logistics",
+    billToAddress: null,
+    billToContact: "王先生 / Mr. Wang",
+    paymentMethod: "公司支票 / Company Check",
+    plate: "TEST-002",
+    vin: null,
+    unit_number: null,
+    driver_name: null,
+    driver_phone: null,
+    status: "In Progress",
+    repairItems: ["更换前大灯 / Replace front headlamp"],
+    parts: [],
+    labor: [],
+    labor_subtotal_cents: 0,
+    cleaning_fee_cents: 0,
+    tax_cents: 0,
+    grand_total_cents: 0,
+    customFontBytes,
+  });
+
+  assert.equal(usedCustomFont, true);
+  assert.ok(pdfBytes.length < 500_000, `Expected a subset font PDF, received ${pdfBytes.length} bytes`);
+  const document = await PDFDocument.load(pdfBytes);
+  assert.equal(document.getPageCount(), 1);
 });
