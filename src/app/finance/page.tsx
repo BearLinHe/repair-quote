@@ -2,8 +2,8 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { BarChart3, Boxes, CircleDollarSign, Clock3, ReceiptText, ShoppingCart } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { BarChart3, Boxes, CircleDollarSign, Clock3, Download, ReceiptText, ShoppingCart } from "lucide-react";
+import { Button, buttonVariants } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { DatePicker } from "@/components/ui/date-picker";
@@ -83,6 +83,14 @@ export default function FinancePage() {
         <div className="w-full sm:w-48"><label className="mb-1 block text-xs font-medium text-muted-foreground">开始日期</label><DatePicker value={start} onChange={setStart} ariaLabel="选择开始日期" /></div>
         <div className="w-full sm:w-48"><label className="mb-1 block text-xs font-medium text-muted-foreground">结束日期</label><DatePicker value={end} onChange={setEnd} ariaLabel="选择结束日期" /></div>
         <Button onClick={load}>更新统计</Button>
+        <a
+          href={`/api/invoices/export?start=${encodeURIComponent(start)}&end=${encodeURIComponent(end)}`}
+          download
+          className={buttonVariants({ variant: "outline", className: "min-h-10" })}
+        >
+          <Download className="size-4" />
+          导出 Invoice
+        </a>
       </div>
       {overview && (
         <div className="space-y-5">
