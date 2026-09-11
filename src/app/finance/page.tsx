@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { BarChart3, Boxes, CircleDollarSign, Clock3, Download, ReceiptText, ShoppingCart } from "lucide-react";
-import { Button, buttonVariants } from "@/components/ui/button";
+import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { DatePicker } from "@/components/ui/date-picker";
@@ -41,6 +41,8 @@ export default function FinancePage() {
   const [end, setEnd] = useState(local(today));
   const [overview, setOverview] = useState<Overview | null>(null);
   const [invoices, setInvoices] = useState<Invoice[]>([]);
+  const [selectedInvoiceIds, setSelectedInvoiceIds] = useState<Set<string>>(new Set());
+  const [exporting, setExporting] = useState(false);
   const [error, setError] = useState("");
 
   const load = async () => {
@@ -51,6 +53,8 @@ export default function FinancePage() {
       ]);
       setOverview(report);
       setInvoices(invoiceData.invoices);
+      const availableIds = new Set(invoiceData.invoices.map((invoice) => invoice.id));
+      setSelectedInvoiceIds((current) => new Set([...current].filter((id) => availableIds.has(id))));
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : "经营数据加载失败");
     }
@@ -71,6 +75,52 @@ export default function FinancePage() {
     }
   };
 
+  const toggleInvoice = (id: string) => {
+    setSelectedInvoiceIds((current) => {
+      const next = new Set(current);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const allSelected = invoices.length > 0 && selectedInvoiceIds.size === invoices.length;
+  const toggleAllInvoices = () => {
+    setSelectedInvoiceIds(allSelected ? new Set() : new Set(invoices.map((invoice) => invoice.id)));
+  };
+
+  const exportSelectedInvoices = async () => {
+    if (selectedInvoiceIds.size === 0 || exporting) return;
+    setExporting(true);
+    setError("");
+    try {
+      const response = await fetch("/api/invoices/export", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ids: [...selectedInvoiceIds] }),
+      });
+      if (!response.ok) {
+        const data = await response.json().catch(() => null);
+        throw new Error(apiErrorMessage(data, "导出失败"));
+      }
+      const blob = await response.blob();
+      const disposition = response.headers.get("Content-Disposition") ?? "";
+      const filename = disposition.match(/filename="([^"]+)"/)?.[1] ?? "invoice-export.xlsx";
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+    } catch (exportError) {
+      setError(exportError instanceof Error ? exportError.message : "导出失败");
+    } finally {
+      setExporting(false);
+    }
+  };
+
   return (
     <div className="page-shell space-y-6">
       <div className="page-hero">
@@ -83,14 +133,6 @@ export default function FinancePage() {
         <div className="w-full sm:w-48"><label className="mb-1 block text-xs font-medium text-muted-foreground">开始日期</label><DatePicker value={start} onChange={setStart} ariaLabel="选择开始日期" /></div>
         <div className="w-full sm:w-48"><label className="mb-1 block text-xs font-medium text-muted-foreground">结束日期</label><DatePicker value={end} onChange={setEnd} ariaLabel="选择结束日期" /></div>
         <Button onClick={load}>更新统计</Button>
-        <a
-          href={`/api/invoices/export?start=${encodeURIComponent(start)}&end=${encodeURIComponent(end)}`}
-          download
-          className={buttonVariants({ variant: "outline", className: "min-h-10" })}
-        >
-          <Download className="size-4" />
-          导出 Invoice
-        </a>
       </div>
       {overview && (
         <div className="space-y-5">
@@ -141,11 +183,20 @@ export default function FinancePage() {
         </div>
       )}
       <div className="space-y-3">
-        <h2 className="text-xl font-bold">Invoice 记录</h2>
+        <div className="flex items-center justify-between gap-3">
+          <h2 className="text-xl font-bold">Invoice 记录</h2>
+          <div className="flex items-center gap-2">
+            <Button variant="ghost" size="sm" onClick={toggleAllInvoices} disabled={invoices.length === 0}>{allSelected ? "取消全选" : "全选"}</Button>
+            <Button size="sm" onClick={exportSelectedInvoices} disabled={selectedInvoiceIds.size === 0 || exporting}>
+              <Download className="size-4" />
+              {exporting ? "正在导出…" : `导出已选（${selectedInvoiceIds.size}）`}
+            </Button>
+          </div>
+        </div>
         <div className="space-y-3 sm:hidden">
           {invoices.map((invoice) => (
             <div key={invoice.id} className="surface-panel p-4">
-              <div className="flex items-start justify-between gap-3"><div className="min-w-0"><p className="truncate font-mono text-xs text-primary">{invoice.invoice_number}</p><p className="mt-1 font-semibold">{invoice.case.plate ?? invoice.case.vin ?? invoice.case.unit_number ?? "-"}</p><p className="text-xs text-muted-foreground">{invoice.case.customer_name ?? "-"} · {new Date(invoice.issued_at).toLocaleDateString("zh-CN")}</p></div><p className="shrink-0 text-lg font-bold tabular-nums">{formatCents(invoice.grand_total_cents)}</p></div>
+              <div className="flex items-start gap-3"><input type="checkbox" checked={selectedInvoiceIds.has(invoice.id)} onChange={() => toggleInvoice(invoice.id)} aria-label={`选择 Invoice ${invoice.invoice_number}`} className="mt-1 size-5 shrink-0 accent-primary" /><div className="flex min-w-0 flex-1 items-start justify-between gap-3"><div className="min-w-0"><p className="truncate font-mono text-xs text-primary">{invoice.invoice_number}</p><p className="mt-1 font-semibold">{invoice.case.plate ?? invoice.case.vin ?? invoice.case.unit_number ?? "-"}</p><p className="text-xs text-muted-foreground">{invoice.case.customer_name ?? "-"} · {new Date(invoice.issued_at).toLocaleDateString("zh-CN")}</p></div><p className="shrink-0 text-lg font-bold tabular-nums">{formatCents(invoice.grand_total_cents)}</p></div></div>
               <div className="mt-3 grid grid-cols-3 gap-2 border-y py-3 text-center"><div><p className="text-[11px] text-muted-foreground">配件收入</p><p className="text-sm font-semibold">{formatCents(invoice.parts_revenue_cents)}</p></div><div><p className="text-[11px] text-muted-foreground">人工收入</p><p className="text-sm font-semibold">{formatCents(invoice.labor_revenue_cents)}</p></div><div><p className="text-[11px] text-muted-foreground">配件成本</p><p className="text-sm font-semibold">{formatCents(invoice.parts_cost_cents)}</p></div></div>
               <div className="mt-3 flex items-center gap-2"><Select value={invoice.payment_status} onValueChange={(value) => updatePayment(invoice.id, value)}><SelectTrigger className="min-w-0 flex-1"><SelectValue>{payment(invoice.payment_status)}</SelectValue></SelectTrigger><SelectContent><SelectItem value="UNPAID">未付款</SelectItem><SelectItem value="PARTIAL">部分付款</SelectItem><SelectItem value="PAID">已付款</SelectItem><SelectItem value="VOID">已作废</SelectItem></SelectContent></Select><Link className="inline-flex min-h-11 items-center rounded-xl border px-4 font-medium text-primary" href={`/cases/${invoice.case_id}`}>详情</Link></div>
             </div>
@@ -153,8 +204,8 @@ export default function FinancePage() {
         </div>
         <div className="surface-panel hidden overflow-x-auto sm:block">
           <table className="data-table w-full min-w-[1220px] text-sm">
-            <thead><tr className="border-b bg-muted/50 text-left"><th className="p-3">Invoice</th><th className="p-3">车辆 / 客户</th><th className="p-3">日期</th><th className="p-3 text-right">配件收入</th><th className="p-3 text-right">人工收入</th><th className="p-3 text-right">清洁/杂费</th><th className="p-3 text-right">税前收入</th><th className="p-3 text-right">配件成本</th><th className="p-3 text-right">账单总额</th><th className="p-3">付款状态</th><th className="p-3" /></tr></thead>
-            <tbody>{invoices.map((invoice) => <tr key={invoice.id} className="border-b last:border-0"><td className="p-3 font-mono text-xs">{invoice.invoice_number}</td><td className="p-3"><p className="font-medium">{invoice.case.plate ?? invoice.case.vin ?? invoice.case.unit_number ?? "-"}</p><p className="text-xs text-muted-foreground">{invoice.case.customer_name ?? "-"}</p></td><td className="p-3">{new Date(invoice.issued_at).toLocaleDateString("zh-CN")}</td><td className="p-3 text-right">{formatCents(invoice.parts_revenue_cents)}</td><td className="p-3 text-right">{formatCents(invoice.labor_revenue_cents)}</td><td className="p-3 text-right">{formatCents(invoice.cleaning_fee_cents)}</td><td className="p-3 text-right font-medium">{formatCents(invoice.parts_revenue_cents + invoice.labor_revenue_cents + invoice.cleaning_fee_cents)}</td><td className="p-3 text-right">{formatCents(invoice.parts_cost_cents)}</td><td className="p-3 text-right font-bold">{formatCents(invoice.grand_total_cents)}</td><td className="p-3"><Select value={invoice.payment_status} onValueChange={(value) => updatePayment(invoice.id, value)}><SelectTrigger className="w-32"><SelectValue>{payment(invoice.payment_status)}</SelectValue></SelectTrigger><SelectContent><SelectItem value="UNPAID">未付款</SelectItem><SelectItem value="PARTIAL">部分付款</SelectItem><SelectItem value="PAID">已付款</SelectItem><SelectItem value="VOID">已作废</SelectItem></SelectContent></Select></td><td className="p-3"><Link className="font-medium text-primary hover:underline" href={`/cases/${invoice.case_id}`}>详情</Link></td></tr>)}</tbody>
+            <thead><tr className="border-b bg-muted/50 text-left"><th className="w-12 p-3 text-center"><input type="checkbox" checked={allSelected} onChange={toggleAllInvoices} aria-label="全选 Invoice" className="size-4 accent-primary" /></th><th className="p-3">Invoice</th><th className="p-3">车辆 / 客户</th><th className="p-3">日期</th><th className="p-3 text-right">配件收入</th><th className="p-3 text-right">人工收入</th><th className="p-3 text-right">清洁/杂费</th><th className="p-3 text-right">税前收入</th><th className="p-3 text-right">配件成本</th><th className="p-3 text-right">账单总额</th><th className="p-3">付款状态</th><th className="p-3" /></tr></thead>
+            <tbody>{invoices.map((invoice) => <tr key={invoice.id} className={`border-b last:border-0 ${selectedInvoiceIds.has(invoice.id) ? "bg-primary/[0.04]" : ""}`}><td className="p-3 text-center"><input type="checkbox" checked={selectedInvoiceIds.has(invoice.id)} onChange={() => toggleInvoice(invoice.id)} aria-label={`选择 Invoice ${invoice.invoice_number}`} className="size-4 accent-primary" /></td><td className="p-3 font-mono text-xs">{invoice.invoice_number}</td><td className="p-3"><p className="font-medium">{invoice.case.plate ?? invoice.case.vin ?? invoice.case.unit_number ?? "-"}</p><p className="text-xs text-muted-foreground">{invoice.case.customer_name ?? "-"}</p></td><td className="p-3">{new Date(invoice.issued_at).toLocaleDateString("zh-CN")}</td><td className="p-3 text-right">{formatCents(invoice.parts_revenue_cents)}</td><td className="p-3 text-right">{formatCents(invoice.labor_revenue_cents)}</td><td className="p-3 text-right">{formatCents(invoice.cleaning_fee_cents)}</td><td className="p-3 text-right font-medium">{formatCents(invoice.parts_revenue_cents + invoice.labor_revenue_cents + invoice.cleaning_fee_cents)}</td><td className="p-3 text-right">{formatCents(invoice.parts_cost_cents)}</td><td className="p-3 text-right font-bold">{formatCents(invoice.grand_total_cents)}</td><td className="p-3"><Select value={invoice.payment_status} onValueChange={(value) => updatePayment(invoice.id, value)}><SelectTrigger className="w-32"><SelectValue>{payment(invoice.payment_status)}</SelectValue></SelectTrigger><SelectContent><SelectItem value="UNPAID">未付款</SelectItem><SelectItem value="PARTIAL">部分付款</SelectItem><SelectItem value="PAID">已付款</SelectItem><SelectItem value="VOID">已作废</SelectItem></SelectContent></Select></td><td className="p-3"><Link className="font-medium text-primary hover:underline" href={`/cases/${invoice.case_id}`}>详情</Link></td></tr>)}</tbody>
           </table>
         </div>
       </div>
