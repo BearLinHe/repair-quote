@@ -1,11 +1,11 @@
-import { auth } from "@clerk/nextjs/server";
 import { redirect } from "next/navigation";
 import Link from "next/link";
 import { prisma } from "@/lib/db";
+import { canAccessOwner, getAuthUserId } from "@/lib/auth";
 import { CaseDetail } from "./case-detail";
 
 export default async function CaseDetailPage({ params }: { params: Promise<{ id: string }> }) {
-  const { userId } = await auth();
+  const userId = await getAuthUserId();
   if (!userId) redirect("/sign-in");
   const { id } = await params;
   const c = await prisma.case.findUnique({
@@ -17,7 +17,7 @@ export default async function CaseDetailPage({ params }: { params: Promise<{ id:
       status_logs: { orderBy: { changed_at: "desc" } },
     },
   });
-  if (!c || c.clerk_user_id !== userId) {
+  if (!c || !canAccessOwner(userId, c.clerk_user_id)) {
     redirect("/dashboard");
   }
   const laborSerialized = c.labor.map((l) => ({ ...l, hours: Number(l.hours) }));

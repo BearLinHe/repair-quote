@@ -1,6 +1,6 @@
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/db";
-import { requireAuth, unauthorizedResponse } from "@/lib/auth";
+import { canAccessOwner, ownerWhere, requireAuth, unauthorizedResponse } from "@/lib/auth";
 import { apiError } from "@/lib/api-error";
 
 export async function GET(
@@ -14,25 +14,25 @@ export async function GET(
     where: { id },
     select: { clerk_user_id: true },
   });
-  if (!c || c.clerk_user_id !== userId) {
+  if (!c || !canAccessOwner(userId, c.clerk_user_id)) {
     return apiError("CASE_NOT_FOUND", "维修单不存在", 404);
   }
 
   const [repairItems, parts, labor] = await Promise.all([
     prisma.caseRepairItem.findMany({
-      where: { case: { clerk_user_id: userId } },
+      where: { case: ownerWhere(userId) },
       orderBy: { updated_at: "desc" },
       select: { name: true },
       take: 200,
     }),
     prisma.casePart.findMany({
-      where: { case: { clerk_user_id: userId } },
+      where: { case: ownerWhere(userId) },
       orderBy: { updated_at: "desc" },
       select: { name: true, unit_price_cents: true },
       take: 200,
     }),
     prisma.caseLabor.findMany({
-      where: { case: { clerk_user_id: userId } },
+      where: { case: ownerWhere(userId) },
       orderBy: { updated_at: "desc" },
       select: { name: true, rate_cents: true },
       take: 200,

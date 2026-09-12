@@ -1,9 +1,8 @@
-import { SignIn } from "@clerk/nextjs";
+import { redirect } from "next/navigation";
+import { getCurrentAccount } from "@/lib/auth";
+import { LoginForm } from "@/components/login-form";
 
-export default function SignInPage() {
-  return (
-    <div className="flex min-h-screen items-center justify-center">
-      <SignIn afterSignInUrl="/dashboard" signUpUrl="/sign-up" />
-    </div>
-  );
+export default async function SignInPage() {
+  if (await getCurrentAccount()) redirect("/dashboard");
+  return <LoginForm />;
 }

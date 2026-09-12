@@ -1,11 +1,12 @@
 import { prisma } from "@/lib/db";
-import { requireAuth, unauthorizedResponse } from "@/lib/auth";
+import { adminReadOnlyResponse, isAdminScope, requireAuth, unauthorizedResponse } from "@/lib/auth";
 import { apiError } from "@/lib/api-error";
 import { auditData, getAuditActor } from "@/lib/audit";
 
 export async function POST(_req: Request, { params }: { params: Promise<{ id: string }> }) {
   const userId = await requireAuth();
   if (!userId) return unauthorizedResponse();
+  if (isAdminScope(userId)) return adminReadOnlyResponse();
   const { id } = await params;
   const order = await prisma.purchaseOrder.findFirst({ where: { id, clerk_user_id: userId } });
   if (!order) return apiError("PURCHASE_NOT_FOUND", "采购单不存在", 404);

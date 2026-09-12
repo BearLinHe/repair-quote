@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { prisma } from "@/lib/db";
-import { requireAuth, unauthorizedResponse } from "@/lib/auth";
+import { adminReadOnlyResponse, isAdminScope, requireAuth, unauthorizedResponse } from "@/lib/auth";
 import { apiError } from "@/lib/api-error";
 import { auditData, getAuditActor } from "@/lib/audit";
 
@@ -18,7 +18,7 @@ export async function GET() {
   const [settings, currentUser, auditLogs] = await Promise.all([
     prisma.setting.findUnique({ where: { id: "default" } }),
     getAuditActor(userId),
-    prisma.auditLog.findMany({ where: { actor_user_id: userId }, orderBy: { created_at: "desc" }, take: 100 }),
+    prisma.auditLog.findMany({ where: isAdminScope(userId) ? {} : { actor_user_id: userId }, orderBy: { created_at: "desc" }, take: 100 }),
   ]);
   if (!settings) {
     return apiError("SETTINGS_NOT_FOUND", "系统配置尚未初始化", 404);
@@ -29,6 +29,7 @@ export async function GET() {
 export async function PATCH(req: Request) {
   const userId = await requireAuth();
   if (!userId) return unauthorizedResponse();
+  if (isAdminScope(userId)) return adminReadOnlyResponse();
 
   const body = await req.json().catch(() => null);
   const parsed = updateSettingsSchema.safeParse(body);

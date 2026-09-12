@@ -2,7 +2,7 @@ import { NextRequest } from "next/server";
 import { readFile } from "fs/promises";
 import { join } from "path";
 import { prisma } from "@/lib/db";
-import { requireAuth, unauthorizedResponse } from "@/lib/auth";
+import { canAccessOwner, requireAuth, unauthorizedResponse } from "@/lib/auth";
 import { apiError } from "@/lib/api-error";
 import { generateCasePdf } from "@/lib/pdf";
 import {
@@ -42,7 +42,7 @@ export async function GET(
       labor: { orderBy: { created_at: "asc" } },
     },
   });
-  if (!c || c.clerk_user_id !== userId) {
+  if (!c || !canAccessOwner(userId, c.clerk_user_id)) {
     return apiError("CASE_NOT_FOUND", "维修单不存在", 404);
   }
 

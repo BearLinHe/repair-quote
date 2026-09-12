@@ -1,7 +1,7 @@
 import { NextRequest } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/db";
-import { requireAuth, unauthorizedResponse } from "@/lib/auth";
+import { adminReadOnlyResponse, isAdminScope, ownerWhere, requireAuth, unauthorizedResponse } from "@/lib/auth";
 import { apiError } from "@/lib/api-error";
 import { generatePurchaseNumber } from "@/lib/purchase-number";
 import { auditData, getAuditActor } from "@/lib/audit";
@@ -22,7 +22,7 @@ export async function GET() {
   const userId = await requireAuth();
   if (!userId) return unauthorizedResponse();
   const orders = await prisma.purchaseOrder.findMany({
-    where: { clerk_user_id: userId },
+    where: ownerWhere(userId),
     include: { lines: { include: { inventory_item: { select: { sku: true, name: true, unit: true } } } } },
     orderBy: [
       { created_at: "desc" },
@@ -36,6 +36,7 @@ export async function GET() {
 export async function POST(req: NextRequest) {
   const userId = await requireAuth();
   if (!userId) return unauthorizedResponse();
+  if (isAdminScope(userId)) return adminReadOnlyResponse();
   const parsed = createSchema.safeParse(await req.json().catch(() => null));
   if (!parsed.success) return apiError("VALIDATION_ERROR", "采购单信息格式不正确", 400, parsed.error.flatten());
   const uniqueIds = [...new Set(parsed.data.lines.map((line) => line.inventory_item_id))];

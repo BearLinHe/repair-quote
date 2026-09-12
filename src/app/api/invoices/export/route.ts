@@ -1,7 +1,7 @@
 import { NextRequest } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/db";
-import { requireAuth, unauthorizedResponse } from "@/lib/auth";
+import { ownerWhere, requireAuth, unauthorizedResponse } from "@/lib/auth";
 import { apiError } from "@/lib/api-error";
 import { buildInvoiceExportBuffer } from "@/lib/invoice-export";
 
@@ -51,7 +51,7 @@ export async function GET(req: NextRequest) {
   if (start > end) return apiError("VALIDATION_ERROR", "开始日期不能晚于结束日期", 400);
 
   const invoices = await prisma.invoiceRecord.findMany({
-    where: { clerk_user_id: userId, issued_at: { gte: start, lte: end } },
+    where: { ...ownerWhere(userId), issued_at: { gte: start, lte: end } },
     include: invoiceInclude,
     orderBy: { issued_at: "desc" },
   });
@@ -67,7 +67,7 @@ export async function POST(req: NextRequest) {
   if (!parsed.success) return apiError("VALIDATION_ERROR", "请选择需要导出的 Invoice", 400);
 
   const invoices = await prisma.invoiceRecord.findMany({
-    where: { clerk_user_id: userId, id: { in: parsed.data.ids } },
+    where: { ...ownerWhere(userId), id: { in: parsed.data.ids } },
     include: invoiceInclude,
     orderBy: { issued_at: "desc" },
   });

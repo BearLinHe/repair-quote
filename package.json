@@ -16,7 +16,6 @@
     "postinstall": "prisma generate"
   },
   "dependencies": {
-    "@clerk/nextjs": "^6.9.3",
     "@pdf-lib/fontkit": "^1.1.1",
     "@prisma/client": "^6.9.0",
     "@radix-ui/react-dialog": "^1.1.4",

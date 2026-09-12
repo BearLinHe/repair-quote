@@ -1,7 +1,7 @@
 import { NextRequest } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/db";
-import { requireAuth, unauthorizedResponse } from "@/lib/auth";
+import { adminReadOnlyResponse, isAdminScope, ownerWhere, requireAuth, unauthorizedResponse } from "@/lib/auth";
 import { apiError } from "@/lib/api-error";
 import { generateInvoiceNumber } from "@/lib/invoice-number";
 import { auditData, getAuditActor } from "@/lib/audit";
@@ -16,16 +16,14 @@ export async function GET(req: NextRequest) {
   const query = parsed.success ? parsed.data.query : undefined;
 
   const where: {
-    clerk_user_id: string;
+    clerk_user_id?: string;
     OR?: Array<
       | { plate: { contains: string; mode: "insensitive" } }
       | { vin: { contains: string; mode: "insensitive" } }
       | { unit_number: { contains: string; mode: "insensitive" } }
       | { invoice_number: { contains: string; mode: "insensitive" } }
     >;
-  } = {
-    clerk_user_id: userId,
-  };
+  } = ownerWhere(userId);
   if (query?.trim()) {
     const q = query.trim();
     where.OR = [
@@ -75,6 +73,7 @@ const createSchema = z
 export async function POST(req: NextRequest) {
   const userId = await requireAuth();
   if (!userId) return unauthorizedResponse();
+  if (isAdminScope(userId)) return adminReadOnlyResponse();
   const body = await req.json();
   const parsed = createSchema.safeParse(body);
   if (!parsed.success) {

@@ -1,15 +1,9 @@
 import type { Metadata, Viewport } from "next";
-import {
-  ClerkProvider,
-  SignInButton,
-  SignUpButton,
-  SignedIn,
-  SignedOut,
-  UserButton,
-} from "@clerk/nextjs";
 import Link from "next/link";
 import { Wrench } from "lucide-react";
 import { AppNavigation, MobileNavigation } from "@/components/app-navigation";
+import { LogoutButton } from "@/components/logout-button";
+import { getCurrentAccount } from "@/lib/auth";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -24,13 +18,13 @@ export const viewport: Viewport = {
   viewportFit: "cover",
 };
 
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  const account = await getCurrentAccount();
   return (
-    <ClerkProvider localization={{ locale: "zh-CN" }}>
       <html lang="zh-CN">
         <body className="min-h-screen bg-background font-sans antialiased">
           <header className="sticky top-0 z-30 border-b border-border/80 bg-card/90 backdrop-blur-xl supports-[backdrop-filter]:bg-card/80">
@@ -47,26 +41,22 @@ export default function RootLayout({
                 </span>
               </Link>
               <div className="ml-auto flex items-center gap-3">
-                <SignedOut>
-                  <SignInButton mode="modal">
-                    <button className="inline-flex min-h-10 items-center rounded-lg px-3 text-sm font-medium hover:bg-muted">登录</button>
-                  </SignInButton>
-                  <SignUpButton mode="modal">
-                    <button className="inline-flex min-h-10 items-center rounded-lg bg-primary px-4 text-sm font-medium text-primary-foreground hover:bg-primary/90">注册</button>
-                  </SignUpButton>
-                </SignedOut>
-                <SignedIn>
+                {account ? <>
                   <AppNavigation />
                   <span className="mx-1 hidden h-7 w-px bg-border lg:block" />
-                  <UserButton afterSignOutUrl="/" />
-                </SignedIn>
+                  <div className="hidden text-right xl:block"><p className="max-w-36 truncate text-xs font-semibold">{account.name}</p><p className="text-[10px] text-muted-foreground">{account.role === "ADMIN" ? "全局只读" : "业务账号"}</p></div>
+                  <span className="flex size-9 shrink-0 items-center justify-center rounded-full bg-primary font-bold text-primary-foreground">{account.name.trim().charAt(0).toUpperCase()}</span>
+                  <LogoutButton />
+                </> : <Link href="/sign-in" className="inline-flex min-h-10 items-center rounded-xl bg-primary px-4 text-sm font-semibold text-primary-foreground">登录</Link>}
               </div>
             </div>
           </header>
-          <main className="min-h-[calc(100vh-64px)] pb-24 sm:min-h-[calc(100vh-76px)] lg:pb-0">{children}</main>
-          <SignedIn><MobileNavigation /></SignedIn>
+          <main className="min-h-[calc(100vh-64px)] pb-24 sm:min-h-[calc(100vh-76px)] lg:pb-0">
+            {account?.role === "ADMIN" && <div className="border-b border-amber-300/60 bg-amber-50 px-4 py-2 text-center text-xs font-medium text-amber-900">管理员全局视图：正在查看全部账号数据，当前为只读模式</div>}
+            {children}
+          </main>
+          {account && <MobileNavigation />}
         </body>
       </html>
-    </ClerkProvider>
   );
 }

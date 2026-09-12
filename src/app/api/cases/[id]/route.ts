@@ -2,7 +2,7 @@ import { NextRequest } from "next/server";
 import { Prisma } from "@prisma/client";
 import { z } from "zod";
 import { prisma } from "@/lib/db";
-import { requireAuth, unauthorizedResponse } from "@/lib/auth";
+import { adminReadOnlyResponse, canAccessOwner, isAdminScope, requireAuth, unauthorizedResponse } from "@/lib/auth";
 import { recalcTotals } from "@/lib/recalc";
 import { apiError } from "@/lib/api-error";
 import { auditData, getAuditActor } from "@/lib/audit";
@@ -37,7 +37,7 @@ async function getCaseAndCheck(id: string, userId: string) {
       status_logs: { orderBy: { changed_at: "desc" } },
     },
   });
-  if (!c || c.clerk_user_id !== userId) return null;
+  if (!c || !canAccessOwner(userId, c.clerk_user_id)) return null;
   return c;
 }
 
@@ -72,6 +72,7 @@ export async function PATCH(
 ) {
   const userId = await requireAuth();
   if (!userId) return unauthorizedResponse();
+  if (isAdminScope(userId)) return adminReadOnlyResponse();
   const { id } = await params;
   const c = await prisma.case.findUnique({
     where: { id },

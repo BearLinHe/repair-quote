@@ -1,7 +1,7 @@
 import { NextRequest } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/db";
-import { requireAuth, unauthorizedResponse } from "@/lib/auth";
+import { adminReadOnlyResponse, isAdminScope, ownerWhere, requireAuth, unauthorizedResponse } from "@/lib/auth";
 import { apiError } from "@/lib/api-error";
 import { auditData, getAuditActor } from "@/lib/audit";
 
@@ -9,10 +9,9 @@ export async function GET() {
   const userId = await requireAuth();
   if (!userId) return unauthorizedResponse();
   const invoices = await prisma.invoiceRecord.findMany({
-    where: { clerk_user_id: userId },
+    where: ownerWhere(userId),
     include: { case: { select: { plate: true, vin: true, unit_number: true, customer_name: true } } },
     orderBy: { issued_at: "desc" },
-    take: 300,
   });
   return Response.json({ invoices });
 }
@@ -25,6 +24,7 @@ const paymentSchema = z.object({
 export async function PATCH(req: NextRequest) {
   const userId = await requireAuth();
   if (!userId) return unauthorizedResponse();
+  if (isAdminScope(userId)) return adminReadOnlyResponse();
   const parsed = paymentSchema.safeParse(await req.json().catch(() => null));
   if (!parsed.success) return apiError("VALIDATION_ERROR", "付款状态格式不正确", 400);
   const invoice = await prisma.invoiceRecord.findFirst({ where: { id: parsed.data.id, clerk_user_id: userId } });

@@ -1,5 +1,5 @@
 import { prisma } from "@/lib/db";
-import { requireAuth, unauthorizedResponse } from "@/lib/auth";
+import { adminReadOnlyResponse, isAdminScope, requireAuth, unauthorizedResponse } from "@/lib/auth";
 import { apiError } from "@/lib/api-error";
 import { weightedAverageCost } from "@/lib/inventory";
 import { auditData, getAuditActor } from "@/lib/audit";
@@ -7,6 +7,7 @@ import { auditData, getAuditActor } from "@/lib/audit";
 export async function POST(_req: Request, { params }: { params: Promise<{ id: string }> }) {
   const userId = await requireAuth();
   if (!userId) return unauthorizedResponse();
+  if (isAdminScope(userId)) return adminReadOnlyResponse();
   const { id } = await params;
   const actor = await getAuditActor(userId);
   try {

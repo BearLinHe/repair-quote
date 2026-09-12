@@ -38,6 +38,38 @@ enum InvoicePaymentStatus {
   VOID
 }
 
+enum AppUserRole {
+  USER
+  ADMIN
+}
+
+model AppUser {
+  id                 String       @id @default(uuid())
+  created_at         DateTime     @default(now())
+  updated_at         DateTime     @updatedAt
+  login              String       @unique
+  email              String?
+  name               String
+  password_hash      String
+  role               AppUserRole  @default(USER)
+  data_owner_id      String?      @unique
+  failed_login_count Int          @default(0)
+  locked_until       DateTime?
+  sessions           AppSession[]
+}
+
+model AppSession {
+  id          String   @id @default(uuid())
+  created_at  DateTime @default(now())
+  expires_at  DateTime
+  token_hash  String   @unique
+  app_user_id String
+  user        AppUser  @relation(fields: [app_user_id], references: [id], onDelete: Cascade)
+
+  @@index([app_user_id])
+  @@index([expires_at])
+}
+
 model Case {
   id                   String     @id @default(uuid())
   invoice_number       String     @unique

@@ -1,6 +1,6 @@
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/db";
-import { requireAuth, unauthorizedResponse } from "@/lib/auth";
+import { ownerWhere, requireAuth, unauthorizedResponse } from "@/lib/auth";
 
 export async function GET(req: NextRequest) {
   const userId = await requireAuth();
@@ -11,14 +11,15 @@ export async function GET(req: NextRequest) {
     ? new Date(`${params.get("start")}T00:00:00.000`)
     : new Date(end.getFullYear(), end.getMonth(), 1);
 
-  const [purchase, invoice, laborHours, items, lowStockCount] = await Promise.all([
+  const scope = ownerWhere(userId);
+  const [purchase, invoice, laborHours, items] = await Promise.all([
     prisma.purchaseOrder.aggregate({
-      where: { clerk_user_id: userId, status: "RECEIVED", received_at: { gte: start, lte: end } },
+      where: { ...scope, status: "RECEIVED", received_at: { gte: start, lte: end } },
       _sum: { total_cents: true },
       _count: true,
     }),
     prisma.invoiceRecord.aggregate({
-      where: { clerk_user_id: userId, issued_at: { gte: start, lte: end }, payment_status: { not: "VOID" } },
+      where: { ...scope, issued_at: { gte: start, lte: end }, payment_status: { not: "VOID" } },
       _sum: {
         parts_revenue_cents: true,
         labor_revenue_cents: true,
@@ -32,7 +33,7 @@ export async function GET(req: NextRequest) {
     prisma.caseLabor.aggregate({
       where: {
         case: {
-          clerk_user_id: userId,
+          ...scope,
           invoice: {
             issued_at: { gte: start, lte: end },
             payment_status: { not: "VOID" },
@@ -41,12 +42,7 @@ export async function GET(req: NextRequest) {
       },
       _sum: { hours: true },
     }),
-    prisma.inventoryItem.findMany({ where: { clerk_user_id: userId, is_active: true }, select: { on_hand_qty: true, reserved_qty: true, avg_cost_cents: true } }),
-    prisma.$queryRaw<Array<{ count: bigint }>>`
-      SELECT COUNT(*) AS count FROM "InventoryItem"
-      WHERE "clerk_user_id" = ${userId} AND "is_active" = true
-        AND ("on_hand_qty" - "reserved_qty") <= "reorder_level"
-    `,
+    prisma.inventoryItem.findMany({ where: { ...scope, is_active: true }, select: { on_hand_qty: true, reserved_qty: true, avg_cost_cents: true, reorder_level: true } }),
   ]);
   const netRevenue = (invoice._sum.parts_revenue_cents ?? 0) + (invoice._sum.labor_revenue_cents ?? 0) + (invoice._sum.cleaning_fee_cents ?? 0);
   const partsCost = invoice._sum.parts_cost_cents ?? 0;
@@ -68,6 +64,6 @@ export async function GET(req: NextRequest) {
     cash_difference_cents: (invoice._sum.grand_total_cents ?? 0) - (purchase._sum.total_cents ?? 0),
     inventory_value_cents: items.reduce((sum, item) => sum + item.on_hand_qty * item.avg_cost_cents, 0),
     reserved_units: items.reduce((sum, item) => sum + item.reserved_qty, 0),
-    low_stock_count: Number(lowStockCount[0]?.count ?? 0),
+    low_stock_count: items.filter((item) => item.on_hand_qty - item.reserved_qty <= item.reorder_level).length,
   });
 }

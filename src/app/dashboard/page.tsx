@@ -1,10 +1,8 @@
-import { auth } from "@clerk/nextjs/server";
 import Link from "next/link";
 import { Plus } from "lucide-react";
 import { CaseList } from "./case-list";
 
 export default async function DashboardPage() {
-  await auth();
   return (
     <div className="page-shell">
       <div className="page-hero mb-6 flex flex-col gap-5 sm:flex-row sm:items-center sm:justify-between">

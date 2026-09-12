@@ -1,7 +1,7 @@
 import { NextRequest } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/db";
-import { requireAuth, unauthorizedResponse } from "@/lib/auth";
+import { adminReadOnlyResponse, isAdminScope, ownerWhere, requireAuth, unauthorizedResponse } from "@/lib/auth";
 import { apiError } from "@/lib/api-error";
 import { auditData, getAuditActor } from "@/lib/audit";
 import { inventoryImageSchema } from "@/lib/inventory-image";
@@ -22,7 +22,7 @@ export async function GET(req: NextRequest) {
   const query = new URL(req.url).searchParams.get("query")?.trim();
   const items = await prisma.inventoryItem.findMany({
     where: {
-      clerk_user_id: userId,
+      ...ownerWhere(userId),
       ...(query
         ? {
             OR: [
@@ -48,6 +48,7 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   const userId = await requireAuth();
   if (!userId) return unauthorizedResponse();
+  if (isAdminScope(userId)) return adminReadOnlyResponse();
   const parsed = createSchema.safeParse(await req.json().catch(() => null));
   if (!parsed.success) return apiError("VALIDATION_ERROR", "库存商品信息格式不正确", 400, parsed.error.flatten());
   const actor = await getAuditActor(userId);

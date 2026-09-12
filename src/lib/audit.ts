@@ -1,5 +1,5 @@
-import { currentUser } from "@clerk/nextjs/server";
 import type { Prisma } from "@prisma/client";
+import { getCurrentAccount } from "@/lib/auth";
 
 export type AuditActor = {
   userId: string;
@@ -8,18 +8,9 @@ export type AuditActor = {
 };
 
 export async function getAuditActor(userId: string): Promise<AuditActor> {
-  try {
-    const user = await currentUser();
-    const email = user?.primaryEmailAddress?.emailAddress ?? user?.emailAddresses[0]?.emailAddress ?? null;
-    const fullName = [user?.firstName, user?.lastName].filter(Boolean).join(" ").trim();
-    return {
-      userId,
-      name: fullName || user?.username || email || userId,
-      email,
-    };
-  } catch {
-    return { userId, name: userId, email: null };
-  }
+  const account = await getCurrentAccount();
+  if (!account) return { userId, name: userId, email: null };
+  return { userId, name: account.name, email: account.email };
 }
 
 export function auditData(
