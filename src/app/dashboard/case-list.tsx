@@ -2,9 +2,10 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import { type ColumnDef, flexRender, getCoreRowModel, getPaginationRowModel, useReactTable } from "@tanstack/react-table";
 import { formatCents } from "@/lib/utils";
 import { Button, buttonVariants } from "@/components/ui/button";
-import { CircleDollarSign, ClipboardCheck, Clock3, Download, Files, Inbox, RefreshCw, Search } from "lucide-react";
+import { ChevronLeft, ChevronRight, CircleDollarSign, ClipboardCheck, Clock3, Download, Eye, Files, Inbox, RefreshCw, Search } from "lucide-react";
 
 type CaseRow = {
   id: string;
@@ -16,6 +17,17 @@ type CaseRow = {
   grand_total_cents: number;
   created_at: string;
 };
+
+const statusLabel = (status: string) =>
+  ({ SUBMITTED: "已提交", IN_PROGRESS: "进行中", CANCELED: "已取消", COMPLETED: "已完成" })[status] ?? status;
+
+const statusClass = (status: string) =>
+  ({
+    SUBMITTED: "bg-sky-50 text-sky-700 ring-sky-600/20 dark:bg-sky-950/50 dark:text-sky-300",
+    IN_PROGRESS: "bg-amber-50 text-amber-700 ring-amber-600/20 dark:bg-amber-950/50 dark:text-amber-300",
+    COMPLETED: "bg-emerald-50 text-emerald-700 ring-emerald-600/20 dark:bg-emerald-950/50 dark:text-emerald-300",
+    CANCELED: "bg-slate-100 text-slate-600 ring-slate-500/20 dark:bg-slate-800 dark:text-slate-300",
+  })[status] ?? "bg-muted text-muted-foreground ring-border";
 
 export function CaseList() {
   const [cases, setCases] = useState<CaseRow[]>([]);
@@ -60,15 +72,6 @@ export function CaseList() {
     };
   }, [query, retryKey]);
 
-  const statusLabel = (s: string) =>
-    ({ SUBMITTED: "已提交", IN_PROGRESS: "进行中", CANCELED: "已取消", COMPLETED: "已完成" })[s] ?? s;
-  const statusClass = (s: string) =>
-    ({
-      SUBMITTED: "bg-sky-50 text-sky-700 ring-sky-600/20 dark:bg-sky-950/50 dark:text-sky-300",
-      IN_PROGRESS: "bg-amber-50 text-amber-700 ring-amber-600/20 dark:bg-amber-950/50 dark:text-amber-300",
-      COMPLETED: "bg-emerald-50 text-emerald-700 ring-emerald-600/20 dark:bg-emerald-950/50 dark:text-emerald-300",
-      CANCELED: "bg-slate-100 text-slate-600 ring-slate-500/20 dark:bg-slate-800 dark:text-slate-300",
-    })[s] ?? "bg-muted text-muted-foreground ring-border";
   const visibleCases = useMemo(
     () => statusFilter === "ALL" ? cases : cases.filter((item) => item.status === statusFilter),
     [cases, statusFilter],
@@ -177,63 +180,82 @@ export function CaseList() {
               </div>
             ))}
           </div>
-          {/* 桌面端：表格 */}
-          <div className="surface-panel hidden overflow-hidden sm:block">
-            <div className="overflow-x-auto">
-              <table className="data-table w-full min-w-[1040px] text-sm">
-                <thead>
-                  <tr className="border-b bg-muted/60 text-xs uppercase tracking-wide text-muted-foreground">
-                    <th className="px-4 py-3.5 text-left font-semibold">Invoice Number</th>
-                    <th className="px-4 py-3.5 text-left font-semibold">车牌</th>
-                    <th className="px-4 py-3.5 text-left font-semibold">车架号</th>
-                    <th className="px-4 py-3.5 text-left font-semibold">车号</th>
-                    <th className="px-4 py-3.5 text-left font-semibold">状态</th>
-                    <th className="px-4 py-3.5 text-right font-semibold">总价</th>
-                    <th className="px-4 py-3.5 text-left font-semibold">创建时间</th>
-                    <th className="px-4 py-3.5"></th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {visibleCases.map((c) => (
-                    <tr key={c.id} className="border-b last:border-0 hover:bg-muted/30 transition-colors">
-                      <td className="px-4 py-4 font-mono text-xs tabular-nums">{c.invoice_number}</td>
-                      <td className="px-4 py-4 font-medium">{c.plate ?? "-"}</td>
-                      <td className="max-w-52 truncate px-4 py-4 text-muted-foreground">{c.vin ?? "-"}</td>
-                      <td className="px-4 py-4">{c.unit_number ?? "-"}</td>
-                      <td className="px-4 py-4"><span className={`rounded-full px-2.5 py-1 text-xs font-medium ring-1 ring-inset ${statusClass(c.status)}`}>{statusLabel(c.status)}</span></td>
-                      <td className="px-4 py-4 text-right font-semibold tabular-nums">{formatCents(c.grand_total_cents)}</td>
-                      <td className="px-4 py-4 text-muted-foreground">
-                        {new Date(c.created_at).toLocaleDateString("zh-CN")}
-                      </td>
-                      <td className="px-4 py-4 text-right">
-                        <div className="flex items-center justify-end gap-2">
-                          {c.status === "COMPLETED" && (
-                            <a
-                              href={`/api/cases/${c.id}/pdf`}
-                              download
-                              className={buttonVariants({ variant: "outline", size: "sm", className: "gap-1.5" })}
-                              aria-label={`下载 Invoice ${c.invoice_number} PDF`}
-                            >
-                              <Download className="size-3.5" />
-                              PDF
-                            </a>
-                          )}
-                          <Link
-                            href={`/cases/${c.id}`}
-                            className="font-medium text-primary hover:underline"
-                          >
-                            详情
-                          </Link>
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
+          <CaseDesktopTable cases={visibleCases} />
         </>
       )}
     </div>
   );
+}
+
+function CaseDesktopTable({ cases }: { cases: CaseRow[] }) {
+  const columns = useMemo<ColumnDef<CaseRow>[]>(() => [
+    {
+      accessorKey: "invoice_number",
+      header: "Invoice",
+      size: 170,
+      cell: ({ row: { original: repairCase } }) => <div className="min-w-0"><Link href={`/cases/${repairCase.id}`} className="font-mono text-xs font-semibold text-primary hover:underline">{repairCase.invoice_number}</Link><p className="mt-1 truncate text-xs text-muted-foreground">{repairCase.plate ? `车牌 · ${repairCase.plate}` : "未填写车牌"}</p></div>,
+    },
+    {
+      accessorKey: "vin",
+      header: "车架号",
+      size: 220,
+      cell: ({ row }) => <span className="block truncate font-mono text-xs text-muted-foreground" title={row.original.vin ?? undefined}>{row.original.vin ?? "-"}</span>,
+    },
+    {
+      accessorKey: "unit_number",
+      header: "车号",
+      size: 150,
+      cell: ({ row }) => <span className="font-medium">{row.original.unit_number ?? "-"}</span>,
+    },
+    {
+      accessorKey: "status",
+      header: "状态",
+      size: 110,
+      cell: ({ row }) => <span className={`inline-flex whitespace-nowrap rounded-full px-2.5 py-1 text-xs font-medium ring-1 ring-inset ${statusClass(row.original.status)}`}>{statusLabel(row.original.status)}</span>,
+    },
+    {
+      accessorKey: "grand_total_cents",
+      header: "总价",
+      size: 130,
+      cell: ({ row }) => <span className="text-base font-bold tabular-nums">{formatCents(row.original.grand_total_cents)}</span>,
+    },
+    {
+      accessorKey: "created_at",
+      header: "创建时间",
+      size: 120,
+      cell: ({ row }) => <span className="whitespace-nowrap text-muted-foreground tabular-nums">{new Date(row.original.created_at).toLocaleDateString("zh-CN")}</span>,
+    },
+    {
+      id: "actions",
+      header: "操作",
+      size: 92,
+      cell: ({ row: { original: repairCase } }) => <div className="flex items-center justify-end gap-1.5">{repairCase.status === "COMPLETED" && <a href={`/api/cases/${repairCase.id}/pdf`} download className="inline-grid size-9 place-items-center rounded-lg border text-muted-foreground transition-colors hover:border-primary/40 hover:bg-primary/5 hover:text-primary" aria-label={`下载 Invoice ${repairCase.invoice_number} PDF`} title="下载 PDF"><Download className="size-4" /></a>}<Link href={`/cases/${repairCase.id}`} className="inline-grid size-9 place-items-center rounded-lg border text-muted-foreground transition-colors hover:border-primary/40 hover:bg-primary/5 hover:text-primary" aria-label={`查看维修单 ${repairCase.invoice_number}`} title="查看详情"><Eye className="size-4" /></Link></div>,
+    },
+  ], []);
+
+  const table = useReactTable({
+    data: cases,
+    columns,
+    initialState: { pagination: { pageIndex: 0, pageSize: 20 } },
+    getCoreRowModel: getCoreRowModel(),
+    getPaginationRowModel: getPaginationRowModel(),
+  });
+  const pageIndex = table.getState().pagination.pageIndex;
+  const pageSize = table.getState().pagination.pageSize;
+  const start = cases.length === 0 ? 0 : pageIndex * pageSize + 1;
+  const end = Math.min((pageIndex + 1) * pageSize, cases.length);
+
+  return <div className="surface-panel hidden overflow-hidden sm:block">
+    <div className="flex items-center justify-between gap-3 border-b px-4 py-3">
+      <div><h2 className="font-semibold">维修单明细</h2><p className="text-xs text-muted-foreground">共 {cases.length} 条</p></div>
+      <div className="flex items-center gap-2 text-xs text-muted-foreground"><span>每页</span><select value={pageSize} onChange={(event) => table.setPageSize(Number(event.target.value))} className="h-8 rounded-lg border bg-background px-2 text-xs text-foreground outline-none focus:border-primary/40">{[20, 50, 100, 200].map((size) => <option key={size} value={size}>{size}</option>)}</select><span>条</span></div>
+    </div>
+    <div className="overflow-x-auto">
+      <table className="data-table w-full min-w-[992px] table-fixed text-sm">
+        <thead>{table.getHeaderGroups().map((headerGroup) => <tr key={headerGroup.id} className="border-b text-left">{headerGroup.headers.map((header) => <th key={header.id} className={`h-11 px-3 text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground ${header.column.id === "grand_total_cents" || header.column.id === "actions" ? "text-right" : ""}`} style={{ width: header.getSize() }}>{header.isPlaceholder ? null : flexRender(header.column.columnDef.header, header.getContext())}</th>)}</tr>)}</thead>
+        <tbody>{table.getRowModel().rows.map((row) => <tr key={row.id} className="border-b transition-colors last:border-0 hover:bg-muted/30">{row.getVisibleCells().map((cell) => <td key={cell.id} className={`h-[68px] px-3 align-middle ${cell.column.id === "grand_total_cents" || cell.column.id === "actions" ? "text-right" : ""}`} style={{ width: cell.column.getSize() }}>{flexRender(cell.column.columnDef.cell, cell.getContext())}</td>)}</tr>)}</tbody>
+      </table>
+    </div>
+    <div className="flex items-center justify-between gap-3 border-t px-4 py-3"><p className="text-sm text-muted-foreground">第 {start}–{end} 条，共 {cases.length} 条</p><div className="flex items-center gap-2"><Button variant="outline" size="sm" onClick={() => table.previousPage()} disabled={!table.getCanPreviousPage()}><ChevronLeft className="size-4" />上一页</Button><span className="min-w-16 text-center text-sm tabular-nums">{pageIndex + 1} / {table.getPageCount()}</span><Button variant="outline" size="sm" onClick={() => table.nextPage()} disabled={!table.getCanNextPage()}>下一页<ChevronRight className="size-4" /></Button></div></div>
+  </div>;
 }

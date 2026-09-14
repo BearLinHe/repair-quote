@@ -14,18 +14,24 @@ export async function GET(req: NextRequest) {
   const end = params.get("end") ? new Date(`${params.get("end")}T23:59:59.999`) : undefined;
   const billTo = params.get("bill_to")?.trim();
   const requestedOwner = params.get("account")?.trim();
+  const page = Math.max(1, Number.parseInt(params.get("page") ?? "1", 10) || 1);
+  const pageSize = Math.min(200, Math.max(10, Number.parseInt(params.get("page_size") ?? "20", 10) || 20));
   const admin = isAdminScope(userId);
   const scope = admin && requestedOwner ? { clerk_user_id: requestedOwner } : ownerWhere(userId);
-  const invoices = await prisma.invoiceRecord.findMany({
-    where: {
-      ...scope,
-      ...(start || end ? { issued_at: { ...(start ? { gte: start } : {}), ...(end ? { lte: end } : {}) } } : {}),
-      ...(billTo ? { case: { bill_to_company: { contains: billTo, mode: "insensitive" as const } } } : {}),
-    },
-    include: { case: { select: { plate: true, vin: true, unit_number: true, customer_name: true, bill_to_company: true } } },
-    orderBy: { issued_at: "desc" },
-  });
-  const [accounts, billToCases] = await Promise.all([
+  const where = {
+    ...scope,
+    ...(start || end ? { issued_at: { ...(start ? { gte: start } : {}), ...(end ? { lte: end } : {}) } } : {}),
+    ...(billTo ? { case: { bill_to_company: { contains: billTo, mode: "insensitive" as const } } } : {}),
+  };
+  const [invoices, total, accounts, billToCases] = await Promise.all([
+    prisma.invoiceRecord.findMany({
+      where,
+      include: { case: { select: { plate: true, vin: true, unit_number: true, customer_name: true, bill_to_company: true } } },
+      orderBy: [{ issued_at: "desc" }, { created_at: "desc" }],
+      skip: (page - 1) * pageSize,
+      take: pageSize,
+    }),
+    prisma.invoiceRecord.count({ where }),
     admin
       ? prisma.appUser.findMany({
         where: { data_owner_id: { not: null } },
@@ -51,6 +57,12 @@ export async function GET(req: NextRequest) {
         ? "Administrator"
         : accountMap.get(invoice.clerk_user_id) ?? invoice.clerk_user_id,
     })),
+    pagination: {
+      page,
+      page_size: pageSize,
+      total,
+      total_pages: Math.max(1, Math.ceil(total / pageSize)),
+    },
     can_filter_accounts: admin,
     bill_to_options: billToCases
       .map((item) => item.bill_to_company?.trim())

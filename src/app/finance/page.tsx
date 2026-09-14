@@ -1,8 +1,9 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { Clock3, Download, Search } from "lucide-react";
+import { ChevronLeft, ChevronRight, Clock3, Download, Eye } from "lucide-react";
+import { type ColumnDef, flexRender, getCoreRowModel, useReactTable } from "@tanstack/react-table";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { DatePicker } from "@/components/ui/date-picker";
@@ -44,7 +45,13 @@ type Invoice = {
 };
 
 type AccountOption = { id: string; name: string; login: string };
-type InvoiceResponse = { invoices: Invoice[]; can_filter_accounts: boolean; accounts: AccountOption[]; bill_to_options: string[] };
+type InvoiceResponse = {
+  invoices: Invoice[];
+  can_filter_accounts: boolean;
+  accounts: AccountOption[];
+  bill_to_options: string[];
+  pagination: { page: number; page_size: number; total: number; total_pages: number };
+};
 
 async function json<T>(url: string, init?: RequestInit): Promise<T> {
   const response = await fetch(url, init);
@@ -75,14 +82,18 @@ export default function FinancePage() {
   const [billToOptions, setBillToOptions] = useState<string[]>([]);
   const [canFilterAccounts, setCanFilterAccounts] = useState(false);
   const [selectedInvoiceIds, setSelectedInvoiceIds] = useState<Set<string>>(new Set());
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(20);
+  const [totalInvoices, setTotalInvoices] = useState(0);
+  const [totalPages, setTotalPages] = useState(1);
   const [loading, setLoading] = useState(true);
   const [exporting, setExporting] = useState(false);
   const [error, setError] = useState("");
 
-  const load = async () => {
+  const load = async (targetPage = page, targetPageSize = pageSize) => {
     setLoading(true);
     setError("");
-    const params = new URLSearchParams({ start, end });
+    const params = new URLSearchParams({ start, end, page: String(targetPage), page_size: String(targetPageSize) });
     if (billTo.trim()) params.set("bill_to", billTo.trim());
     if (account !== "all") params.set("account", account);
     try {
@@ -95,6 +106,10 @@ export default function FinancePage() {
       setAccounts(invoiceData.accounts);
       setBillToOptions(invoiceData.bill_to_options);
       setCanFilterAccounts(invoiceData.can_filter_accounts);
+      setPage(invoiceData.pagination.page);
+      setPageSize(invoiceData.pagination.page_size);
+      setTotalInvoices(invoiceData.pagination.total);
+      setTotalPages(invoiceData.pagination.total_pages);
       const availableIds = new Set(invoiceData.invoices.map((invoice) => invoice.id));
       setSelectedInvoiceIds((current) => new Set([...current].filter((id) => availableIds.has(id))));
     } catch (loadError) {
@@ -105,9 +120,10 @@ export default function FinancePage() {
   };
 
   useEffect(() => {
-    void load();
+    const timeout = window.setTimeout(() => void load(1), billTo.trim() ? 300 : 0);
+    return () => window.clearTimeout(timeout);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [start, end, billTo, account]);
 
   const updatePayment = async (id: string, payment_status: string) => {
     try {
@@ -116,7 +132,7 @@ export default function FinancePage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ id, payment_status }),
       });
-      await load();
+      await load(page);
     } catch (updateError) {
       setError(updateError instanceof Error ? updateError.message : "更新失败");
     }
@@ -186,12 +202,11 @@ export default function FinancePage() {
       {error && <div className="rounded-xl border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive">{error}</div>}
 
       <section className="surface-panel p-4">
-        <div className={`grid gap-3 ${canFilterAccounts ? "md:grid-cols-2 xl:grid-cols-[180px_180px_1fr_240px_auto]" : "md:grid-cols-2 xl:grid-cols-[180px_180px_1fr_auto]"}`}>
+        <div className={`grid gap-3 ${canFilterAccounts ? "md:grid-cols-2 xl:grid-cols-[180px_180px_1fr_240px]" : "md:grid-cols-2 xl:grid-cols-[180px_180px_1fr]"}`}>
           <div><label className="mb-1.5 block text-xs font-medium text-muted-foreground">开始日期</label><DatePicker value={start} onChange={setStart} ariaLabel="选择开始日期" /></div>
           <div><label className="mb-1.5 block text-xs font-medium text-muted-foreground">结束日期</label><DatePicker value={end} onChange={setEnd} ariaLabel="选择结束日期" /></div>
-          <div className="relative"><label className="mb-1.5 block text-xs font-medium text-muted-foreground">Bill To</label><Input value={billTo} onChange={(event) => { setBillTo(event.target.value); setBillToOpen(true); }} onFocus={() => setBillToOpen(true)} onBlur={() => window.setTimeout(() => setBillToOpen(false), 120)} onKeyDown={(event) => event.key === "Enter" && void load()} placeholder="搜索或选择公司" role="combobox" aria-expanded={billToOpen} />{billToOpen && <div className="absolute z-50 mt-1 max-h-64 w-full overflow-auto rounded-xl border bg-popover p-1 text-popover-foreground shadow-lg"><button type="button" className="w-full rounded-lg px-3 py-2 text-left text-sm hover:bg-muted" onMouseDown={(event) => event.preventDefault()} onClick={() => { setBillTo(""); setBillToOpen(false); }}>全部 Bill To</button>{matchingBillToOptions.map((company) => <button key={company} type="button" className="w-full rounded-lg px-3 py-2 text-left text-sm hover:bg-muted" onMouseDown={(event) => event.preventDefault()} onClick={() => { setBillTo(company); setBillToOpen(false); }}>{company}</button>)}{matchingBillToOptions.length === 0 && billTo.trim() && <p className="px-3 py-2 text-sm text-muted-foreground">没有匹配项，将按输入内容搜索</p>}</div>}</div>
+          <div className="relative"><label className="mb-1.5 block text-xs font-medium text-muted-foreground">Bill To</label><Input value={billTo} onChange={(event) => { setBillTo(event.target.value); setBillToOpen(true); }} onFocus={() => setBillToOpen(true)} onBlur={() => window.setTimeout(() => setBillToOpen(false), 120)} placeholder="搜索或选择公司" role="combobox" aria-expanded={billToOpen} />{billToOpen && <div className="absolute z-50 mt-1 max-h-64 w-full overflow-auto rounded-xl border bg-popover p-1 text-popover-foreground shadow-lg"><button type="button" className="w-full rounded-lg px-3 py-2 text-left text-sm hover:bg-muted" onMouseDown={(event) => event.preventDefault()} onClick={() => { setBillTo(""); setBillToOpen(false); }}>全部 Bill To</button>{matchingBillToOptions.map((company) => <button key={company} type="button" className="w-full rounded-lg px-3 py-2 text-left text-sm hover:bg-muted" onMouseDown={(event) => event.preventDefault()} onClick={() => { setBillTo(company); setBillToOpen(false); }}>{company}</button>)}{matchingBillToOptions.length === 0 && billTo.trim() && <p className="px-3 py-2 text-sm text-muted-foreground">没有匹配项，将按输入内容搜索</p>}</div>}</div>
           {canFilterAccounts && <div><label className="mb-1.5 block text-xs font-medium text-muted-foreground">操作账号</label><Select value={account} onValueChange={setAccount}><SelectTrigger><SelectValue placeholder="全部账号" /></SelectTrigger><SelectContent><SelectItem value="all">全部账号</SelectItem>{accounts.map((item) => <SelectItem key={item.id} value={item.id}>{item.name} · {item.login}</SelectItem>)}</SelectContent></Select></div>}
-          <Button className="self-end" onClick={() => void load()} disabled={loading}><Search className="size-4" />{loading ? "查询中" : "查询"}</Button>
         </div>
       </section>
 
@@ -211,7 +226,7 @@ export default function FinancePage() {
 
       <section className="space-y-3">
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <div><h2 className="text-xl font-bold">Invoice 明细</h2><p className="mt-0.5 text-xs text-muted-foreground">当前筛选结果 {invoices.length} 条</p></div>
+          <div><h2 className="text-xl font-bold">Invoice 明细</h2><p className="mt-0.5 text-xs text-muted-foreground">共 {totalInvoices} 条 · 默认按最新开票时间排序</p></div>
           <div className="flex items-center gap-2">
             <Button variant="ghost" size="sm" onClick={toggleAllInvoices} disabled={invoices.length === 0}>{allSelected ? "取消全选" : "全选"}</Button>
             <Button size="sm" onClick={exportSelectedInvoices} disabled={selectedInvoiceIds.size === 0 || exporting}><Download className="size-4" />{exporting ? "正在导出" : `导出已选 ${selectedInvoiceIds.size}`}</Button>
@@ -224,11 +239,26 @@ export default function FinancePage() {
           {invoices.map((invoice) => <InvoiceCard key={invoice.id} invoice={invoice} checked={selectedInvoiceIds.has(invoice.id)} onToggle={() => toggleInvoice(invoice.id)} onPayment={updatePayment} />)}
         </div>
 
-        {invoices.length > 0 && <div className="surface-panel hidden overflow-x-auto md:block">
-          <table className="data-table w-full min-w-[1080px] text-sm">
-            <thead><tr className="border-b bg-muted/40 text-left"><th className="w-12 p-3 text-center"><input type="checkbox" checked={allSelected} onChange={toggleAllInvoices} aria-label="全选 Invoice" className="size-4 accent-primary" /></th><th className="p-3">Invoice</th><th className="p-3">Bill To</th><th className="p-3">操作账号</th><th className="p-3">日期</th><th className="p-3">收入构成</th><th className="p-3 text-right">账单总额</th><th className="p-3">付款状态</th><th className="p-3" /></tr></thead>
-            <tbody>{invoices.map((invoice) => <tr key={invoice.id} className={`border-b last:border-0 ${selectedInvoiceIds.has(invoice.id) ? "bg-primary/[0.04]" : ""}`}><td className="p-3 text-center"><input type="checkbox" checked={selectedInvoiceIds.has(invoice.id)} onChange={() => toggleInvoice(invoice.id)} aria-label={`选择 Invoice ${invoice.invoice_number}`} className="size-4 accent-primary" /></td><td className="p-3"><p className="font-mono text-xs font-medium">{invoice.invoice_number}</p><p className="mt-1 text-xs text-muted-foreground">{invoice.case.plate ?? invoice.case.vin ?? invoice.case.unit_number ?? "-"}</p></td><td className="p-3"><p className="font-medium">{invoice.case.bill_to_company ?? "-"}</p><p className="mt-1 text-xs text-muted-foreground">{invoice.case.customer_name ?? "-"}</p></td><td className="p-3">{invoice.owner_name}</td><td className="p-3 tabular-nums">{new Date(invoice.issued_at).toLocaleDateString("zh-CN")}</td><td className="p-3"><p className="tabular-nums">零件 {formatCents(invoice.parts_revenue_cents)} · 人工 {formatCents(invoice.labor_revenue_cents)}</p>{invoice.cleaning_fee_cents > 0 && <p className="mt-1 text-xs text-muted-foreground">杂费 {formatCents(invoice.cleaning_fee_cents)}</p>}</td><td className="p-3 text-right text-base font-bold tabular-nums">{formatCents(invoice.grand_total_cents)}</td><td className="p-3"><PaymentSelect value={invoice.payment_status} onChange={(value) => updatePayment(invoice.id, value)} /></td><td className="p-3"><Link className="font-medium text-primary hover:underline" href={`/cases/${invoice.case_id}`}>详情</Link></td></tr>)}</tbody>
-          </table>
+        {invoices.length > 0 && <InvoiceDesktopTable invoices={invoices} selectedInvoiceIds={selectedInvoiceIds} allSelected={allSelected} onToggle={toggleInvoice} onToggleAll={toggleAllInvoices} onPayment={updatePayment} />}
+        {totalInvoices > 0 && <div className="flex flex-col items-center justify-between gap-3 rounded-xl border bg-background/40 px-4 py-3 sm:flex-row">
+          <div className="flex flex-wrap items-center justify-center gap-3 sm:justify-start">
+            <p className="text-sm text-muted-foreground">第 {(page - 1) * pageSize + 1}–{Math.min(page * pageSize, totalInvoices)} 条，共 {totalInvoices} 条</p>
+            <div className="flex items-center gap-2 text-sm text-muted-foreground">
+              <span>每页</span>
+              <Select value={String(pageSize)} onValueChange={(value) => {
+                const nextPageSize = Number(value);
+                setPageSize(nextPageSize);
+                void load(1, nextPageSize);
+              }} disabled={loading}>
+                <SelectTrigger className="h-9 w-20"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {[20, 50, 100, 200].map((size) => <SelectItem key={size} value={String(size)}>{size}</SelectItem>)}
+                </SelectContent>
+              </Select>
+              <span>条</span>
+            </div>
+          </div>
+          <div className="flex items-center gap-2"><Button variant="outline" size="sm" onClick={() => void load(page - 1)} disabled={loading || page <= 1}><ChevronLeft className="size-4" />上一页</Button><span className="min-w-20 text-center text-sm tabular-nums">{page} / {totalPages}</span><Button variant="outline" size="sm" onClick={() => void load(page + 1)} disabled={loading || page >= totalPages}>下一页<ChevronRight className="size-4" /></Button></div>
         </div>}
       </section>
     </div>
@@ -239,8 +269,92 @@ function RevenueItem({ label, value, icon = false }: { label: string; value: str
   return <div className="flex items-center justify-between gap-3 border-b pb-3 last:border-0 last:pb-0 sm:border-0 sm:pb-0"><span className="flex items-center gap-2 text-sm text-muted-foreground">{icon && <Clock3 className="size-4 text-primary" />}{label}</span><strong className="tabular-nums">{value}</strong></div>;
 }
 
-function PaymentSelect({ value, onChange }: { value: string; onChange: (value: string) => void }) {
-  return <Select value={value} onValueChange={onChange}><SelectTrigger className="w-28"><SelectValue>{paymentLabel(value)}</SelectValue></SelectTrigger><SelectContent><SelectItem value="UNPAID">未付款</SelectItem><SelectItem value="PARTIAL">部分付款</SelectItem><SelectItem value="PAID">已付款</SelectItem><SelectItem value="VOID">已作废</SelectItem></SelectContent></Select>;
+function IncomeBreakdown({ invoice }: { invoice: Invoice }) {
+  const entries = [
+    ["零件", invoice.parts_revenue_cents],
+    ["人工", invoice.labor_revenue_cents],
+    ...(invoice.cleaning_fee_cents > 0 ? [["杂费", invoice.cleaning_fee_cents]] : []),
+  ] as [string, number][];
+  return <div className="flex flex-wrap gap-1.5">{entries.map(([label, value]) => <span key={label} className="inline-flex items-center gap-1.5 rounded-md bg-muted/70 px-2 py-1 text-xs"><span className="text-muted-foreground">{label}</span><strong className="font-semibold tabular-nums">{formatCents(value)}</strong></span>)}</div>;
+}
+
+function InvoiceDesktopTable({ invoices, selectedInvoiceIds, allSelected, onToggle, onToggleAll, onPayment }: { invoices: Invoice[]; selectedInvoiceIds: Set<string>; allSelected: boolean; onToggle: (id: string) => void; onToggleAll: () => void; onPayment: (id: string, status: string) => void }) {
+  const columns = useMemo<ColumnDef<Invoice>[]>(() => [
+    {
+      id: "select",
+      size: 48,
+      header: () => <input type="checkbox" checked={allSelected} onChange={onToggleAll} aria-label="全选 Invoice" className="size-4 accent-primary" />,
+      cell: ({ row }) => <input type="checkbox" checked={selectedInvoiceIds.has(row.original.id)} onChange={() => onToggle(row.original.id)} aria-label={`选择 Invoice ${row.original.invoice_number}`} className="size-4 accent-primary" />,
+    },
+    {
+      accessorKey: "invoice_number",
+      header: "Invoice",
+      size: 155,
+      cell: ({ row: { original: invoice } }) => {
+        const reference = invoice.case.plate ?? invoice.case.vin ?? invoice.case.unit_number;
+        return <div className="min-w-0"><Link href={`/cases/${invoice.case_id}`} className="font-mono text-xs font-semibold text-primary hover:underline">{invoice.invoice_number}</Link><p className="mt-1 truncate text-xs text-muted-foreground">{reference ? `车辆 · ${reference}` : "未填写车辆信息"}</p></div>;
+      },
+    },
+    {
+      id: "bill_to",
+      header: "Bill To",
+      size: 190,
+      cell: ({ row: { original: invoice } }) => <div className="min-w-0"><p className="truncate font-semibold">{invoice.case.bill_to_company ?? "未填写 Bill To"}</p>{invoice.case.customer_name && <p className="mt-1 truncate text-xs text-muted-foreground">联系人 · {invoice.case.customer_name}</p>}</div>,
+    },
+    {
+      accessorKey: "owner_name",
+      header: "操作账号",
+      size: 130,
+      cell: ({ row: { original: invoice } }) => <div className="flex min-w-0 items-center gap-2"><span className="grid size-7 shrink-0 place-items-center rounded-full bg-primary/10 text-[11px] font-bold text-primary">{invoice.owner_name.trim().charAt(0).toUpperCase() || "-"}</span><span className="truncate font-medium">{invoice.owner_name}</span></div>,
+    },
+    {
+      accessorKey: "issued_at",
+      header: "开票日期",
+      size: 100,
+      cell: ({ row: { original: invoice } }) => <span className="whitespace-nowrap text-muted-foreground tabular-nums">{new Date(invoice.issued_at).toLocaleDateString("zh-CN")}</span>,
+    },
+    {
+      id: "revenue",
+      header: "收入构成",
+      size: 220,
+      cell: ({ row }) => <IncomeBreakdown invoice={row.original} />,
+    },
+    {
+      accessorKey: "grand_total_cents",
+      header: "账单总额",
+      size: 115,
+      cell: ({ row: { original: invoice } }) => <span className="text-base font-bold tabular-nums">{formatCents(invoice.grand_total_cents)}</span>,
+    },
+    {
+      accessorKey: "payment_status",
+      header: "付款状态",
+      size: 95,
+      cell: ({ row: { original: invoice } }) => <PaymentSelect compact value={invoice.payment_status} onChange={(value) => onPayment(invoice.id, value)} />,
+    },
+    {
+      id: "actions",
+      header: "操作",
+      size: 60,
+      cell: ({ row: { original: invoice } }) => <Link className="inline-grid size-9 place-items-center rounded-lg border text-muted-foreground transition-colors hover:border-primary/40 hover:bg-primary/5 hover:text-primary" href={`/cases/${invoice.case_id}`} aria-label={`查看 Invoice ${invoice.invoice_number}`} title="查看详情"><Eye className="size-4" /></Link>,
+    },
+  ], [allSelected, onPayment, onToggle, onToggleAll, selectedInvoiceIds]);
+
+  const table = useReactTable({ data: invoices, columns, getCoreRowModel: getCoreRowModel() });
+
+  return <div className="surface-panel hidden overflow-x-auto md:block">
+    <table className="data-table w-full min-w-[1113px] table-fixed text-sm">
+      <thead>{table.getHeaderGroups().map((headerGroup) => <tr key={headerGroup.id} className="border-b text-left">{headerGroup.headers.map((header) => <th key={header.id} className={`h-11 px-3 text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground ${header.column.id === "select" ? "text-center" : ""} ${header.column.id === "grand_total_cents" || header.column.id === "actions" ? "text-right" : ""}`} style={{ width: header.getSize() }}>{header.isPlaceholder ? null : flexRender(header.column.columnDef.header, header.getContext())}</th>)}</tr>)}</thead>
+      <tbody>{table.getRowModel().rows.map((row) => {
+        const checked = selectedInvoiceIds.has(row.original.id);
+        return <tr key={row.id} className={`group border-b transition-colors last:border-0 ${checked ? "bg-primary/[0.055]" : "hover:bg-muted/30"}`}>{row.getVisibleCells().map((cell) => <td key={cell.id} className={`h-[68px] px-3 align-middle ${cell.column.id === "select" ? `border-l-2 text-center ${checked ? "border-l-primary" : "border-l-transparent"}` : ""} ${cell.column.id === "grand_total_cents" || cell.column.id === "actions" ? "text-right" : ""}`} style={{ width: cell.column.getSize() }}>{flexRender(cell.column.columnDef.cell, cell.getContext())}</td>)}</tr>;
+      })}</tbody>
+    </table>
+  </div>;
+}
+
+function PaymentSelect({ value, onChange, compact = false }: { value: string; onChange: (value: string) => void; compact?: boolean }) {
+  const tone = value === "PAID" ? "border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900 dark:bg-emerald-950/30 dark:text-emerald-300" : value === "PARTIAL" ? "border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-300" : value === "VOID" ? "border-slate-200 bg-slate-50 text-slate-500 dark:border-slate-800 dark:bg-slate-900/40 dark:text-slate-400" : "border-border bg-background";
+  return <Select value={value} onValueChange={onChange}><SelectTrigger className={`${compact ? "h-8 w-[92px] rounded-lg px-2.5 text-xs" : "w-28"} ${tone}`}><SelectValue>{paymentLabel(value)}</SelectValue></SelectTrigger><SelectContent><SelectItem value="UNPAID">未付款</SelectItem><SelectItem value="PARTIAL">部分付款</SelectItem><SelectItem value="PAID">已付款</SelectItem><SelectItem value="VOID">已作废</SelectItem></SelectContent></Select>;
 }
 
 function InvoiceCard({ invoice, checked, onToggle, onPayment }: { invoice: Invoice; checked: boolean; onToggle: () => void; onPayment: (id: string, status: string) => void }) {
