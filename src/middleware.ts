@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 
-const protectedPrefixes = ["/dashboard", "/cases", "/purchases", "/inventory", "/finance", "/settings"];
+const protectedPrefixes = ["/dashboard", "/cases", "/purchases", "/inventory", "/finance", "/reconciliation", "/settings"];
 
 export function middleware(req: NextRequest) {
   const protectedPage = protectedPrefixes.some((prefix) => req.nextUrl.pathname.startsWith(prefix));

@@ -276,9 +276,45 @@ model InvoiceRecord {
   payment_status      InvoicePaymentStatus @default(UNPAID)
   snapshot            Json
 
-  case Case @relation(fields: [case_id], references: [id], onDelete: Restrict)
+  case        Case                @relation(fields: [case_id], references: [id], onDelete: Restrict)
+  allocations PaymentAllocation[]
 
   @@index([clerk_user_id, issued_at])
+}
+
+model CustomerPayment {
+  id                 String   @id @default(uuid())
+  created_at         DateTime @default(now())
+  updated_at         DateTime @updatedAt
+  clerk_user_id      String
+  bill_to_company    String
+  received_at        DateTime
+  amount_cents       Int
+  payment_method     String
+  reference_number   String?
+  note               String?
+  created_by_user_id String
+  created_by_name    String
+  created_by_email   String?
+
+  allocations PaymentAllocation[]
+
+  @@index([clerk_user_id, received_at])
+  @@index([bill_to_company, received_at])
+}
+
+model PaymentAllocation {
+  id           String   @id @default(uuid())
+  created_at   DateTime @default(now())
+  payment_id   String
+  invoice_id   String
+  amount_cents Int
+
+  payment CustomerPayment @relation(fields: [payment_id], references: [id], onDelete: Cascade)
+  invoice InvoiceRecord   @relation(fields: [invoice_id], references: [id], onDelete: Restrict)
+
+  @@unique([payment_id, invoice_id])
+  @@index([invoice_id, created_at])
 }
 
 model AuditLog {

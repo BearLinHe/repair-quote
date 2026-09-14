@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { ChartNoAxesCombined, PackagePlus, SlidersHorizontal, Warehouse, Wrench } from "lucide-react";
+import { ChartNoAxesCombined, PackagePlus, ReceiptText, SlidersHorizontal, Warehouse, Wrench } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const links = [
@@ -10,6 +10,7 @@ const links = [
   { href: "/inventory", label: "库存管理", shortLabel: "库存", icon: Warehouse, match: ["/inventory"] },
   { href: "/dashboard", label: "维修单", shortLabel: "维修", icon: Wrench, match: ["/dashboard", "/cases"] },
   { href: "/finance", label: "经营分析", shortLabel: "经营", icon: ChartNoAxesCombined, match: ["/finance"] },
+  { href: "/reconciliation", label: "财务销账", shortLabel: "销账", icon: ReceiptText, match: ["/reconciliation"] },
   { href: "/settings", label: "系统设置", shortLabel: "设置", icon: SlidersHorizontal, match: ["/settings"] },
 ];
 
@@ -48,7 +49,7 @@ export function MobileNavigation() {
   const isActive = (matches: string[]) => matches.some((value) => pathname.startsWith(value));
 
   return (
-      <nav className="fixed inset-x-0 bottom-0 z-40 grid grid-cols-5 border-t border-border/80 bg-card/95 px-[max(8px,env(safe-area-inset-left))] pb-[max(7px,env(safe-area-inset-bottom))] pt-1.5 shadow-[0_-8px_30px_rgba(0,0,0,0.08)] backdrop-blur-xl lg:hidden" aria-label="手机导航">
+      <nav className="fixed inset-x-0 bottom-0 z-40 grid grid-cols-6 border-t border-border/80 bg-card/95 px-[max(4px,env(safe-area-inset-left))] pb-[max(7px,env(safe-area-inset-bottom))] pt-1.5 shadow-[0_-8px_30px_rgba(0,0,0,0.08)] backdrop-blur-xl lg:hidden" aria-label="手机导航">
         {links.map(({ href, shortLabel, icon: Icon, match }) => {
           const active = isActive(match);
           return (
