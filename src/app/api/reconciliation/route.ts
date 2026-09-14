@@ -1,5 +1,6 @@
 import { NextRequest } from "next/server";
 import { z } from "zod";
+import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import {
   canAccessOwner,
@@ -13,12 +14,7 @@ import {
 } from "@/lib/auth";
 import { apiError } from "@/lib/api-error";
 import { auditData, getAuditActor } from "@/lib/audit";
-
-const centsPaid = (invoice: { grand_total_cents: number; payment_status: string; allocations: { amount_cents: number }[] }) => {
-  const allocated = invoice.allocations.reduce((sum, allocation) => sum + allocation.amount_cents, 0);
-  // 兼容上线前由人工标记为“已付款”的历史 Invoice。
-  return allocated === 0 && invoice.payment_status === "PAID" ? invoice.grand_total_cents : allocated;
-};
+import { invoicePaidCents as centsPaid } from "@/lib/payment-reconciliation";
 
 export async function GET(req: NextRequest) {
   const userId = await requireAuth();
@@ -211,9 +207,12 @@ export async function POST(req: NextRequest) {
         }),
       });
       return created;
-    });
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable, timeout: 15000 });
     return Response.json(payment, { status: 201 });
   } catch (error) {
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2034") {
+      return apiError("CONCURRENT_UPDATE", "Invoice 余额刚刚发生变动，请刷新后重新分配", 409);
+    }
     const message = error instanceof Error ? error.message : "";
     if (message === "INVOICE_NOT_FOUND") return apiError("INVOICE_NOT_FOUND", "Invoice 不存在或无权操作", 404);
     if (message === "INVOICE_VOID") return apiError("INVOICE_VOID", "已作废的 Invoice 不能销账", 400);

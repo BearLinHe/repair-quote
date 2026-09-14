@@ -128,6 +128,8 @@ export default function SettingsPage() {
     CASE_LABOR_DELETED: "删除人工费用",
     SETTINGS_UPDATED: "修改系统配置",
     INVOICE_PAYMENT_UPDATED: "修改 Invoice 付款状态",
+    PAYMENT_RECONCILED: "登记收款并销账",
+    PAYMENT_ALLOCATION_ADDED: "继续销账",
     ACCOUNT_PERMISSIONS_UPDATED: "修改账号权限",
   })[action] ?? action;
 

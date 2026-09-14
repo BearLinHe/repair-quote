@@ -9,6 +9,7 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { apiErrorMessage } from "@/lib/api-error";
 import { formatCents } from "@/lib/utils";
+import { ContinuePaymentDialog } from "./continue-payment-dialog";
 
 type OpenInvoice = {
   id: string;
@@ -89,6 +90,7 @@ export default function ReconciliationPage() {
   const [referenceNumber, setReferenceNumber] = useState("");
   const [note, setNote] = useState("");
   const [allocations, setAllocations] = useState<Record<string, string>>({});
+  const [continuingPaymentId, setContinuingPaymentId] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -257,18 +259,24 @@ export default function ReconciliationPage() {
     </section>
 
     <section className="surface-panel overflow-hidden">
-      <div className="border-b px-4 py-4 sm:px-5"><h2 className="font-bold">销账记录</h2><p className="mt-0.5 text-xs text-muted-foreground">最近 200 笔，按收款日期倒序</p></div>
+      <div className="border-b px-4 py-4 sm:px-5"><h2 className="font-bold">收款与销账记录</h2><p className="mt-0.5 text-xs text-muted-foreground">尚有余额的收款可继续销账 · 最近 200 笔</p></div>
       <div className="divide-y">
         {(data?.payments ?? []).map((payment) => <div key={payment.id} className="grid gap-3 px-4 py-4 md:grid-cols-[130px_minmax(180px,1fr)_130px_minmax(220px,1fr)_140px] md:items-center md:px-5">
           <div><p className="font-semibold tabular-nums">{new Date(payment.received_at).toLocaleDateString("zh-CN")}</p><p className="text-xs text-muted-foreground">{payment.created_by_name}</p></div>
           <div><p className="font-semibold">{payment.bill_to_company}</p><p className="text-xs text-muted-foreground">{payment.payment_method}{payment.reference_number ? ` · ${payment.reference_number}` : ""}</p></div>
           <div><p className="text-lg font-bold tabular-nums">{formatCents(payment.amount_cents)}</p>{payment.amount_cents > payment.allocated_cents && <p className="text-xs text-amber-700">未分配 {formatCents(payment.amount_cents - payment.allocated_cents)}</p>}</div>
           <div className="flex flex-wrap gap-1.5">{payment.allocations.length ? payment.allocations.map((allocation) => <span key={allocation.id} className="rounded-md bg-muted px-2 py-1 text-xs"><span className="font-mono">{allocation.invoice.invoice_number}</span> · {formatCents(allocation.amount_cents)}</span>) : <span className="text-xs text-muted-foreground">暂未分配 Invoice</span>}</div>
-          <p className="text-xs text-muted-foreground md:text-right">{payment.note || "—"}</p>
+          <div className="flex flex-col items-start gap-2 md:items-end">
+            {payment.amount_cents > payment.allocated_cents
+              ? <Button size="sm" variant="outline" onClick={() => setContinuingPaymentId(payment.id)}>继续销账<ArrowRight className="size-4" /></Button>
+              : <span className="inline-flex items-center gap-1 text-xs text-primary"><CheckCircle2 className="size-3.5" />已全部销账</span>}
+            {payment.note && <p className="text-xs text-muted-foreground md:text-right">{payment.note}</p>}
+          </div>
         </div>)}
         {!loading && (data?.payments.length ?? 0) === 0 && <p className="p-8 text-center text-sm text-muted-foreground">当前条件下没有销账记录</p>}
       </div>
     </section>
+    {continuingPaymentId && <ContinuePaymentDialog key={continuingPaymentId} paymentId={continuingPaymentId} onClose={() => setContinuingPaymentId(null)} onSaved={() => { setAllocations({}); void load(); }} />}
   </div>;
 }
 
