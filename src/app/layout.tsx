@@ -44,7 +44,7 @@ export default async function RootLayout({
                 {account ? <>
                   <AppNavigation />
                   <span className="mx-1 hidden h-7 w-px bg-border lg:block" />
-                  <div className="hidden text-right xl:block"><p className="max-w-36 truncate text-xs font-semibold">{account.name}</p><p className="text-[10px] text-muted-foreground">{account.role === "ADMIN" ? "全局只读" : "业务账号"}</p></div>
+                  <div className="hidden text-right xl:block"><p className="max-w-36 truncate text-xs font-semibold">{account.name}</p><p className="text-[10px] text-muted-foreground">{account.role === "ADMIN" ? "最高管理员" : account.canWrite ? "业务账号" : "只读账号"}</p></div>
                   <span className="flex size-9 shrink-0 items-center justify-center rounded-full bg-primary font-bold text-primary-foreground">{account.name.trim().charAt(0).toUpperCase()}</span>
                   <LogoutButton />
                 </> : <Link href="/sign-in" className="inline-flex min-h-10 items-center rounded-xl bg-primary px-4 text-sm font-semibold text-primary-foreground">登录</Link>}
@@ -52,7 +52,8 @@ export default async function RootLayout({
             </div>
           </header>
           <main className="min-h-[calc(100vh-64px)] pb-24 sm:min-h-[calc(100vh-76px)] lg:pb-0">
-            {account?.role === "ADMIN" && <div className="border-b border-amber-300/60 bg-amber-50 px-4 py-2 text-center text-xs font-medium text-amber-900">管理员全局视图：正在查看全部账号数据，当前为只读模式</div>}
+            {account?.role === "ADMIN" && <div className="border-b border-primary/20 bg-primary/5 px-4 py-2 text-center text-xs font-medium text-primary">最高管理员：可查看和管理全部账号数据</div>}
+            {account?.role === "USER" && !account.canWrite && <div className="border-b border-amber-300/60 bg-amber-50 px-4 py-2 text-center text-xs font-medium text-amber-900">当前账号为仅查看权限，如需编辑请联系管理员</div>}
             {children}
           </main>
           {account && <MobileNavigation />}

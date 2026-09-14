@@ -1,7 +1,7 @@
 import { NextRequest } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/db";
-import { adminReadOnlyResponse, isAdminScope, ownerWhere, requireAuth, unauthorizedResponse } from "@/lib/auth";
+import { isWriteForbiddenScope, ownerWhere, requireAuth, requireWriteAuth, unauthorizedResponse, writeForbiddenResponse } from "@/lib/auth";
 import { apiError } from "@/lib/api-error";
 import { generateInvoiceNumber } from "@/lib/invoice-number";
 import { auditData, getAuditActor } from "@/lib/audit";
@@ -71,9 +71,9 @@ const createSchema = z
   });
 
 export async function POST(req: NextRequest) {
-  const userId = await requireAuth();
+  const userId = await requireWriteAuth();
   if (!userId) return unauthorizedResponse();
-  if (isAdminScope(userId)) return adminReadOnlyResponse();
+  if (isWriteForbiddenScope(userId)) return writeForbiddenResponse();
   const body = await req.json();
   const parsed = createSchema.safeParse(body);
   if (!parsed.success) {

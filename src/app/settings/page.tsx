@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { History, UserRound } from "lucide-react";
+import { History, ShieldCheck, UserRound } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -16,7 +16,17 @@ type SettingsForm = {
   taxRate: string;
 };
 
-type CurrentUserInfo = { userId: string; name: string; email: string | null };
+type CurrentUserInfo = { userId: string; name: string; email: string | null; role?: "USER" | "ADMIN"; can_write?: boolean };
+type ManagedAccount = {
+  id: string;
+  login: string;
+  email: string | null;
+  name: string;
+  role: "USER" | "ADMIN";
+  is_active: boolean;
+  can_write: boolean;
+  data_owner_id: string | null;
+};
 type AuditLog = {
   id: string;
   created_at: string;
@@ -43,6 +53,8 @@ export default function SettingsPage() {
   const [error, setError] = useState("");
   const [currentUserInfo, setCurrentUserInfo] = useState<CurrentUserInfo | null>(null);
   const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
+  const [accounts, setAccounts] = useState<ManagedAccount[]>([]);
+  const [savingAccountId, setSavingAccountId] = useState<string | null>(null);
 
   useEffect(() => {
     fetch("/api/settings")
@@ -60,6 +72,7 @@ export default function SettingsPage() {
         });
         setCurrentUserInfo(data.current_user ?? null);
         setAuditLogs(data.audit_logs ?? []);
+        setAccounts(data.accounts ?? []);
       })
       .catch((loadError) => setError(loadError instanceof Error ? loadError.message : "配置加载失败"))
       .finally(() => setLoading(false));
@@ -67,6 +80,31 @@ export default function SettingsPage() {
 
   const updateField = (field: keyof SettingsForm, value: string) => {
     setForm((current) => ({ ...current, [field]: value }));
+  };
+
+  const updateAccountDraft = (id: string, changes: Partial<Pick<ManagedAccount, "is_active" | "can_write">>) => {
+    setAccounts((current) => current.map((account) => account.id === id ? { ...account, ...changes } : account));
+  };
+
+  const saveAccountPermissions = async (account: ManagedAccount) => {
+    setSavingAccountId(account.id);
+    setError("");
+    setMessage("");
+    try {
+      const response = await fetch(`/api/settings/accounts/${account.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ is_active: account.is_active, can_write: account.can_write }),
+      });
+      const data = await response.json().catch(() => null);
+      if (!response.ok) throw new Error(apiErrorMessage(data, "权限保存失败"));
+      setAccounts((current) => current.map((item) => item.id === account.id ? data.account : item));
+      setMessage(`已更新 ${account.login} 的账号权限`);
+    } catch (saveError) {
+      setError(saveError instanceof Error ? saveError.message : "权限保存失败");
+    } finally {
+      setSavingAccountId(null);
+    }
   };
 
   const actionLabel = (action: string) => ({
@@ -90,6 +128,7 @@ export default function SettingsPage() {
     CASE_LABOR_DELETED: "删除人工费用",
     SETTINGS_UPDATED: "修改系统配置",
     INVOICE_PAYMENT_UPDATED: "修改 Invoice 付款状态",
+    ACCOUNT_PERMISSIONS_UPDATED: "修改账号权限",
   })[action] ?? action;
 
   const save = async (event: React.FormEvent) => {
@@ -133,6 +172,34 @@ export default function SettingsPage() {
               <div className="min-w-0"><p className="text-xs font-semibold text-muted-foreground">当前登录账号</p><h2 className="mt-1 truncate text-lg font-bold">{currentUserInfo.name}</h2><p className="truncate text-sm text-muted-foreground">{currentUserInfo.email ?? "未设置邮箱"}</p></div>
             </div>
             <div className="rounded-xl bg-muted/60 px-4 py-3"><p className="text-xs text-muted-foreground">账号 ID</p><p className="mt-1 max-w-[320px] truncate font-mono text-xs">{currentUserInfo.userId}</p></div>
+          </CardContent>
+        </Card>
+      )}
+      {accounts.length > 0 && (
+        <Card className="overflow-hidden">
+          <CardHeader className="border-b">
+            <div className="flex items-center gap-3"><ShieldCheck className="size-5 text-primary" /><CardTitle>账号权限管理</CardTitle></div>
+          </CardHeader>
+          <CardContent className="p-0">
+            <div className="divide-y divide-border/70">
+              {accounts.map((account) => (
+                <div key={account.id} className="grid gap-4 p-5 sm:grid-cols-[minmax(0,1fr)_180px_180px_auto] sm:items-center">
+                  <div className="min-w-0">
+                    <div className="flex flex-wrap items-center gap-2"><p className="truncate font-semibold">{account.name}</p><span className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${account.role === "ADMIN" ? "bg-primary/10 text-primary" : "bg-muted text-muted-foreground"}`}>{account.role === "ADMIN" ? "最高管理员" : "普通账号"}</span></div>
+                    <p className="mt-1 truncate text-sm text-muted-foreground">{account.login}</p>
+                  </div>
+                  <div className="grid gap-1.5">
+                    <Label htmlFor={`status-${account.id}`} className="text-xs text-muted-foreground">账号状态</Label>
+                    <select id={`status-${account.id}`} value={account.is_active ? "active" : "disabled"} disabled={account.role === "ADMIN"} onChange={(event) => updateAccountDraft(account.id, { is_active: event.target.value === "active" })} className="min-h-10 rounded-xl border border-input bg-background px-3 text-sm disabled:cursor-not-allowed disabled:opacity-60"><option value="active">启用</option><option value="disabled">停用</option></select>
+                  </div>
+                  <div className="grid gap-1.5">
+                    <Label htmlFor={`access-${account.id}`} className="text-xs text-muted-foreground">业务权限</Label>
+                    <select id={`access-${account.id}`} value={account.can_write ? "write" : "read"} disabled={account.role === "ADMIN"} onChange={(event) => updateAccountDraft(account.id, { can_write: event.target.value === "write" })} className="min-h-10 rounded-xl border border-input bg-background px-3 text-sm disabled:cursor-not-allowed disabled:opacity-60"><option value="write">可查看和编辑</option><option value="read">仅查看</option></select>
+                  </div>
+                  {account.role === "ADMIN" ? <span className="text-xs font-medium text-muted-foreground sm:text-right">权限固定</span> : <Button type="button" variant="outline" disabled={savingAccountId === account.id} onClick={() => saveAccountPermissions(account)}>{savingAccountId === account.id ? "保存中..." : "保存权限"}</Button>}
+                </div>
+              ))}
+            </div>
           </CardContent>
         </Card>
       )}

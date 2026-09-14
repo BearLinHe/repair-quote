@@ -5,6 +5,7 @@ import { apiError } from "@/lib/api-error";
 
 export const SESSION_COOKIE = "yaoyuan_session";
 export const ADMIN_SCOPE_ID = "__ADMIN__";
+export const WRITE_FORBIDDEN_SCOPE_ID = "__WRITE_FORBIDDEN__";
 const SESSION_DAYS = 30;
 
 export type CurrentAccount = {
@@ -14,6 +15,8 @@ export type CurrentAccount = {
   name: string;
   role: "USER" | "ADMIN";
   dataOwnerId: string | null;
+  isActive: boolean;
+  canWrite: boolean;
 };
 
 export function hashSessionToken(token: string) {
@@ -35,7 +38,7 @@ export async function getCurrentAccount(): Promise<CurrentAccount | null> {
     where: { token_hash: hashSessionToken(token) },
     include: { user: true },
   });
-  if (!session || session.expires_at <= new Date()) return null;
+  if (!session || session.expires_at <= new Date() || !session.user.is_active) return null;
   return {
     id: session.user.id,
     login: session.user.login,
@@ -43,6 +46,8 @@ export async function getCurrentAccount(): Promise<CurrentAccount | null> {
     name: session.user.name,
     role: session.user.role,
     dataOwnerId: session.user.data_owner_id,
+    isActive: session.user.is_active,
+    canWrite: session.user.can_write,
   };
 }
 
@@ -50,6 +55,14 @@ export async function requireAuth() {
   const account = await getCurrentAccount();
   if (!account) return null;
   return account.role === "ADMIN" ? ADMIN_SCOPE_ID : account.dataOwnerId;
+}
+
+export async function requireWriteAuth() {
+  const account = await getCurrentAccount();
+  if (!account) return null;
+  if (account.role === "ADMIN") return ADMIN_SCOPE_ID;
+  if (!account.canWrite) return WRITE_FORBIDDEN_SCOPE_ID;
+  return account.dataOwnerId;
 }
 
 export function unauthorizedResponse() {
@@ -64,6 +77,10 @@ export function isAdminScope(userId: string) {
   return userId === ADMIN_SCOPE_ID;
 }
 
+export function isWriteForbiddenScope(userId: string) {
+  return userId === WRITE_FORBIDDEN_SCOPE_ID;
+}
+
 export function canAccessOwner(userId: string, ownerId: string) {
   return isAdminScope(userId) || userId === ownerId;
 }
@@ -72,6 +89,6 @@ export function ownerWhere(userId: string) {
   return isAdminScope(userId) ? {} : { clerk_user_id: userId };
 }
 
-export function adminReadOnlyResponse() {
-  return apiError("ADMIN_READ_ONLY", "管理员账号当前为全局只读账号", 403);
+export function writeForbiddenResponse() {
+  return apiError("WRITE_FORBIDDEN", "当前账号为只读权限，不能新增或修改数据", 403);
 }

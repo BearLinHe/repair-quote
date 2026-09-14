@@ -1,28 +1,28 @@
 import { prisma } from "@/lib/db";
-import { adminReadOnlyResponse, isAdminScope, requireAuth, unauthorizedResponse } from "@/lib/auth";
+import { canAccessOwner, isWriteForbiddenScope, requireWriteAuth, unauthorizedResponse, writeForbiddenResponse } from "@/lib/auth";
 import { apiError } from "@/lib/api-error";
 import { weightedAverageCost } from "@/lib/inventory";
 import { auditData, getAuditActor } from "@/lib/audit";
 
 export async function POST(_req: Request, { params }: { params: Promise<{ id: string }> }) {
-  const userId = await requireAuth();
+  const userId = await requireWriteAuth();
   if (!userId) return unauthorizedResponse();
-  if (isAdminScope(userId)) return adminReadOnlyResponse();
+  if (isWriteForbiddenScope(userId)) return writeForbiddenResponse();
   const { id } = await params;
   const actor = await getAuditActor(userId);
   try {
     const received = await prisma.$transaction(async (tx) => {
       await tx.$queryRaw`SELECT id FROM "PurchaseOrder" WHERE id = ${id} FOR UPDATE`;
       const order = await tx.purchaseOrder.findFirst({
-        where: { id, clerk_user_id: userId },
+        where: { id },
         include: { lines: true },
       });
-      if (!order) throw new Error("NOT_FOUND");
+      if (!order || !canAccessOwner(userId, order.clerk_user_id)) throw new Error("NOT_FOUND");
       if (order.status !== "DRAFT") throw new Error("NOT_DRAFT");
 
       for (const line of order.lines) {
         await tx.$queryRaw`SELECT id FROM "InventoryItem" WHERE id = ${line.inventory_item_id} FOR UPDATE`;
-        const item = await tx.inventoryItem.findFirst({ where: { id: line.inventory_item_id, clerk_user_id: userId } });
+        const item = await tx.inventoryItem.findFirst({ where: { id: line.inventory_item_id, clerk_user_id: order.clerk_user_id } });
         if (!item) throw new Error("ITEM_NOT_FOUND");
         const nextAverage = weightedAverageCost(item.on_hand_qty, item.avg_cost_cents, line.qty, line.unit_cost_cents);
         await tx.inventoryItem.update({
@@ -31,7 +31,7 @@ export async function POST(_req: Request, { params }: { params: Promise<{ id: st
         });
         await tx.stockMovement.create({
           data: {
-            clerk_user_id: userId,
+            clerk_user_id: order.clerk_user_id,
             inventory_item_id: item.id,
             type: "PURCHASE_RECEIPT",
             qty_change: line.qty,

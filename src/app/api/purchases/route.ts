@@ -1,7 +1,7 @@
 import { NextRequest } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/db";
-import { adminReadOnlyResponse, isAdminScope, ownerWhere, requireAuth, unauthorizedResponse } from "@/lib/auth";
+import { canAccessOwner, isWriteForbiddenScope, ownerWhere, requireAuth, requireWriteAuth, unauthorizedResponse, writeForbiddenResponse } from "@/lib/auth";
 import { apiError } from "@/lib/api-error";
 import { generatePurchaseNumber } from "@/lib/purchase-number";
 import { auditData, getAuditActor } from "@/lib/audit";
@@ -34,14 +34,17 @@ export async function GET() {
 }
 
 export async function POST(req: NextRequest) {
-  const userId = await requireAuth();
+  const userId = await requireWriteAuth();
   if (!userId) return unauthorizedResponse();
-  if (isAdminScope(userId)) return adminReadOnlyResponse();
+  if (isWriteForbiddenScope(userId)) return writeForbiddenResponse();
   const parsed = createSchema.safeParse(await req.json().catch(() => null));
   if (!parsed.success) return apiError("VALIDATION_ERROR", "采购单信息格式不正确", 400, parsed.error.flatten());
   const uniqueIds = [...new Set(parsed.data.lines.map((line) => line.inventory_item_id))];
-  const items = await prisma.inventoryItem.findMany({ where: { id: { in: uniqueIds }, clerk_user_id: userId, is_active: true } });
-  if (items.length !== uniqueIds.length) return apiError("INVENTORY_ITEM_NOT_FOUND", "采购明细包含无效库存商品", 400);
+  const items = await prisma.inventoryItem.findMany({ where: { id: { in: uniqueIds }, is_active: true } });
+  if (items.length !== uniqueIds.length || items.some((item) => !canAccessOwner(userId, item.clerk_user_id))) return apiError("INVENTORY_ITEM_NOT_FOUND", "采购明细包含无效库存商品", 400);
+  const ownerIds = [...new Set(items.map((item) => item.clerk_user_id))];
+  if (ownerIds.length !== 1) return apiError("MIXED_DATA_OWNER", "一张采购单只能包含同一账号的库存零件", 400);
+  const orderOwnerId = ownerIds[0];
   const itemMap = new Map(items.map((item) => [item.id, item]));
   const actor = await getAuditActor(userId);
   const subtotal = parsed.data.lines.reduce((sum, line) => sum + line.qty * line.unit_cost_cents, 0);
@@ -52,7 +55,7 @@ export async function POST(req: NextRequest) {
   }
   const order = await prisma.$transaction(async (tx) => {
     const created = await tx.purchaseOrder.create({ data: {
-      clerk_user_id: userId,
+      clerk_user_id: orderOwnerId,
       purchase_number: purchaseNumber,
       supplier: parsed.data.supplier,
       purchase_date: new Date(parsed.data.purchase_date),

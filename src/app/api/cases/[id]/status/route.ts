@@ -1,7 +1,7 @@
 import { NextRequest } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/db";
-import { requireAuth, unauthorizedResponse } from "@/lib/auth";
+import { canAccessOwner, isWriteForbiddenScope, requireWriteAuth, unauthorizedResponse, writeForbiddenResponse } from "@/lib/auth";
 import { Prisma, type CaseStatus } from "@prisma/client";
 import { canTransitionCase } from "@/lib/case-rules";
 import { apiError } from "@/lib/api-error";
@@ -18,14 +18,15 @@ export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const userId = await requireAuth();
+  const userId = await requireWriteAuth();
   if (!userId) return unauthorizedResponse();
+  if (isWriteForbiddenScope(userId)) return writeForbiddenResponse();
   const { id } = await params;
   const c = await prisma.case.findUnique({
     where: { id },
     select: { id: true, clerk_user_id: true, status: true },
   });
-  if (!c || c.clerk_user_id !== userId) return apiError("CASE_NOT_FOUND", "维修单不存在", 404);
+  if (!c || !canAccessOwner(userId, c.clerk_user_id)) return apiError("CASE_NOT_FOUND", "维修单不存在", 404);
 
   const body = await req.json();
   const parsed = bodySchema.safeParse(body);
@@ -51,7 +52,7 @@ export async function POST(
           const actualCost = await consumeReservation(tx, {
             itemId: part.inventory_item_id,
             qty: part.qty,
-            userId,
+            userId: c.clerk_user_id,
             casePartId: part.id,
           });
           await tx.casePart.update({
@@ -72,7 +73,7 @@ export async function POST(
           await changeReservation(tx, {
             itemId: part.inventory_item_id,
             delta: -part.qty,
-            userId,
+            userId: c.clerk_user_id,
             casePartId: part.id,
           });
           await tx.casePart.update({ where: { id: part.id }, data: { reservation_active: false } });

@@ -1,7 +1,7 @@
 import { NextRequest } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/db";
-import { requireAuth, unauthorizedResponse } from "@/lib/auth";
+import { canAccessOwner, isWriteForbiddenScope, requireWriteAuth, unauthorizedResponse, writeForbiddenResponse } from "@/lib/auth";
 import { recalcTotals } from "@/lib/recalc";
 import { apiError } from "@/lib/api-error";
 import { canEditCaseDetails } from "@/lib/case-rules";
@@ -11,12 +11,12 @@ import { syncCompletedInvoice } from "@/lib/invoice-record";
 
 async function checkCase(id: string, userId: string) {
   const c = await prisma.case.findUnique({ where: { id }, select: { clerk_user_id: true, status: true } });
-  return c && c.clerk_user_id === userId ? c.status : null;
+  return c && canAccessOwner(userId, c.clerk_user_id) ? c : null;
 }
 
-function editAccessError(status: Awaited<ReturnType<typeof checkCase>>) {
-  if (!status) return apiError("CASE_NOT_FOUND", "维修单不存在", 404);
-  if (!canEditCaseDetails(status)) return apiError("CASE_READ_ONLY", "已取消的维修单不能修改", 409);
+function editAccessError(caseRecord: Awaited<ReturnType<typeof checkCase>>) {
+  if (!caseRecord) return apiError("CASE_NOT_FOUND", "维修单不存在", 404);
+  if (!canEditCaseDetails(caseRecord.status)) return apiError("CASE_READ_ONLY", "已取消的维修单不能修改", 409);
   return null;
 }
 
@@ -34,11 +34,12 @@ export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const userId = await requireAuth();
+  const userId = await requireWriteAuth();
   if (!userId) return unauthorizedResponse();
+  if (isWriteForbiddenScope(userId)) return writeForbiddenResponse();
   const { id } = await params;
-  const caseStatus = await checkCase(id, userId);
-  const accessError = editAccessError(caseStatus);
+  const caseRecord = await checkCase(id, userId);
+  const accessError = editAccessError(caseRecord);
   if (accessError) return accessError;
   const body = await req.json();
   const parsed = createSchema.safeParse({
@@ -51,7 +52,7 @@ export async function POST(
   const actor = await getAuditActor(userId);
   try {
     const part = await prisma.$transaction(async (tx) => {
-      const inventoryItem = await tx.inventoryItem.findFirst({ where: { id: inventory_item_id, clerk_user_id: userId, is_active: true } });
+      const inventoryItem = await tx.inventoryItem.findFirst({ where: { id: inventory_item_id, clerk_user_id: caseRecord!.clerk_user_id, is_active: true } });
       if (!inventoryItem) throw new Error("INVENTORY_ITEM_NOT_FOUND");
       const resolvedUnitPrice = unit_price_cents ?? inventoryItem.default_sale_price_cents;
       const created = await tx.casePart.create({
@@ -64,16 +65,16 @@ export async function POST(
           inventory_item_id: inventoryItem.id,
           unit_cost_snapshot_cents: inventoryItem.avg_cost_cents,
           cost_total_cents: inventoryItem.avg_cost_cents * qty,
-          reservation_active: caseStatus === "IN_PROGRESS",
+          reservation_active: caseRecord!.status === "IN_PROGRESS",
         },
       });
-      if (caseStatus === "COMPLETED") {
-        await changeCompletedConsumption(tx, { itemId: inventoryItem.id, delta: qty, userId, casePartId: created.id, unitCostCents: inventoryItem.avg_cost_cents });
+      if (caseRecord!.status === "COMPLETED") {
+        await changeCompletedConsumption(tx, { itemId: inventoryItem.id, delta: qty, userId: caseRecord!.clerk_user_id, casePartId: created.id, unitCostCents: inventoryItem.avg_cost_cents });
       } else {
-        await reserveInventory(tx, { itemId: inventoryItem.id, qty, userId, casePartId: created.id, note: `维修单 ${id}` });
+        await reserveInventory(tx, { itemId: inventoryItem.id, qty, userId: caseRecord!.clerk_user_id, casePartId: created.id, note: `维修单 ${id}` });
       }
       await recalcTotals(id, tx);
-      if (caseStatus === "COMPLETED") await syncCompletedInvoice(id, tx);
+      if (caseRecord!.status === "COMPLETED") await syncCompletedInvoice(id, tx);
       await tx.auditLog.create({ data: auditData(actor, { action: "CASE_PART_ADDED", entityType: "CASE", entityId: id, entityLabel: inventoryItem.name, details: { qty, unit_price_cents: resolvedUnitPrice } }) });
       return created;
     });
@@ -89,11 +90,12 @@ export async function PUT(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const userId = await requireAuth();
+  const userId = await requireWriteAuth();
   if (!userId) return unauthorizedResponse();
+  if (isWriteForbiddenScope(userId)) return writeForbiddenResponse();
   const { id } = await params;
-  const caseStatus = await checkCase(id, userId);
-  const accessError = editAccessError(caseStatus);
+  const caseRecord = await checkCase(id, userId);
+  const accessError = editAccessError(caseRecord);
   if (accessError) return accessError;
   const body = await req.json();
   const partId = body.id as string | undefined;
@@ -118,12 +120,12 @@ export async function PUT(
         await changeReservation(tx, {
           itemId: existing.inventory_item_id,
           delta: qty - existing.qty,
-          userId,
+          userId: caseRecord!.clerk_user_id,
           casePartId: existing.id,
         });
       }
-      if (caseStatus === "COMPLETED" && existing.inventory_item_id && qty !== existing.qty) {
-        await changeCompletedConsumption(tx, { itemId: existing.inventory_item_id, delta: qty - existing.qty, userId, casePartId: existing.id, unitCostCents: existing.unit_cost_snapshot_cents });
+      if (caseRecord!.status === "COMPLETED" && existing.inventory_item_id && qty !== existing.qty) {
+        await changeCompletedConsumption(tx, { itemId: existing.inventory_item_id, delta: qty - existing.qty, userId: caseRecord!.clerk_user_id, casePartId: existing.id, unitCostCents: existing.unit_cost_snapshot_cents });
       }
       const updated = await tx.casePart.update({
         where: { id: partId },
@@ -135,7 +137,7 @@ export async function PUT(
         },
       });
       await recalcTotals(id, tx);
-      if (caseStatus === "COMPLETED") await syncCompletedInvoice(id, tx);
+      if (caseRecord!.status === "COMPLETED") await syncCompletedInvoice(id, tx);
       await tx.auditLog.create({ data: auditData(actor, { action: "CASE_PART_UPDATED", entityType: "CASE", entityId: id, entityLabel: existing.name, details: { qty, unit_price_cents } }) });
       return updated;
     });
@@ -150,11 +152,12 @@ export async function DELETE(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const userId = await requireAuth();
+  const userId = await requireWriteAuth();
   if (!userId) return unauthorizedResponse();
+  if (isWriteForbiddenScope(userId)) return writeForbiddenResponse();
   const { id } = await params;
-  const caseStatus = await checkCase(id, userId);
-  const accessError = editAccessError(caseStatus);
+  const caseRecord = await checkCase(id, userId);
+  const accessError = editAccessError(caseRecord);
   if (accessError) return accessError;
   const { searchParams } = new URL(req.url);
   const partId = searchParams.get("id");
@@ -169,16 +172,16 @@ export async function DELETE(
       await changeReservation(tx, {
         itemId: existing.inventory_item_id,
         delta: -existing.qty,
-        userId,
+        userId: caseRecord!.clerk_user_id,
         casePartId: existing.id,
       });
     }
-    if (caseStatus === "COMPLETED" && existing.inventory_item_id) {
-      await changeCompletedConsumption(tx, { itemId: existing.inventory_item_id, delta: -existing.qty, userId, casePartId: existing.id, unitCostCents: existing.unit_cost_snapshot_cents });
+    if (caseRecord!.status === "COMPLETED" && existing.inventory_item_id) {
+      await changeCompletedConsumption(tx, { itemId: existing.inventory_item_id, delta: -existing.qty, userId: caseRecord!.clerk_user_id, casePartId: existing.id, unitCostCents: existing.unit_cost_snapshot_cents });
     }
     await tx.casePart.delete({ where: { id: partId } });
     await recalcTotals(id, tx);
-    if (caseStatus === "COMPLETED") await syncCompletedInvoice(id, tx);
+    if (caseRecord!.status === "COMPLETED") await syncCompletedInvoice(id, tx);
     await tx.auditLog.create({ data: auditData(actor, { action: "CASE_PART_DELETED", entityType: "CASE", entityId: id, entityLabel: existing.name, details: { qty: existing.qty } }) });
   });
   return Response.json({ ok: true });

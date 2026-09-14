@@ -1,7 +1,7 @@
 import { NextRequest } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/db";
-import { adminReadOnlyResponse, isAdminScope, requireAuth, unauthorizedResponse } from "@/lib/auth";
+import { canAccessOwner, isWriteForbiddenScope, requireWriteAuth, unauthorizedResponse, writeForbiddenResponse } from "@/lib/auth";
 import { apiError } from "@/lib/api-error";
 import { auditData, getAuditActor } from "@/lib/audit";
 import { inventoryImageSchema } from "@/lib/inventory-image";
@@ -17,14 +17,14 @@ const schema = z.object({
 });
 
 export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  const userId = await requireAuth();
+  const userId = await requireWriteAuth();
   if (!userId) return unauthorizedResponse();
-  if (isAdminScope(userId)) return adminReadOnlyResponse();
+  if (isWriteForbiddenScope(userId)) return writeForbiddenResponse();
   const { id } = await params;
   const parsed = schema.safeParse(await req.json().catch(() => null));
   if (!parsed.success) return apiError("VALIDATION_ERROR", "维护信息格式不正确", 400, parsed.error.flatten());
-  const existing = await prisma.inventoryItem.findFirst({ where: { id, clerk_user_id: userId } });
-  if (!existing) return apiError("INVENTORY_ITEM_NOT_FOUND", "库存商品不存在", 404);
+  const existing = await prisma.inventoryItem.findUnique({ where: { id } });
+  if (!existing || !canAccessOwner(userId, existing.clerk_user_id)) return apiError("INVENTORY_ITEM_NOT_FOUND", "库存商品不存在", 404);
   const actor = await getAuditActor(userId);
   const updated = await prisma.$transaction(async (tx) => {
     const result = await tx.inventoryItem.update({ where: { id }, data: parsed.data });

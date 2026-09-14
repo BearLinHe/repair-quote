@@ -1,7 +1,7 @@
 import { NextRequest } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/db";
-import { adminReadOnlyResponse, isAdminScope, requireAuth, unauthorizedResponse } from "@/lib/auth";
+import { canAccessOwner, isWriteForbiddenScope, requireWriteAuth, unauthorizedResponse, writeForbiddenResponse } from "@/lib/auth";
 import { apiError } from "@/lib/api-error";
 import { auditData, getAuditActor } from "@/lib/audit";
 
@@ -12,9 +12,9 @@ const schema = z.object({
 });
 
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  const userId = await requireAuth();
+  const userId = await requireWriteAuth();
   if (!userId) return unauthorizedResponse();
-  if (isAdminScope(userId)) return adminReadOnlyResponse();
+  if (isWriteForbiddenScope(userId)) return writeForbiddenResponse();
   const { id } = await params;
   const parsed = schema.safeParse(await req.json().catch(() => null));
   if (!parsed.success) return apiError("VALIDATION_ERROR", "盘点信息格式不正确", 400, parsed.error.flatten());
@@ -22,8 +22,8 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   try {
     const item = await prisma.$transaction(async (tx) => {
       await tx.$queryRaw`SELECT id FROM "InventoryItem" WHERE id = ${id} FOR UPDATE`;
-      const current = await tx.inventoryItem.findFirst({ where: { id, clerk_user_id: userId } });
-      if (!current) throw new Error("NOT_FOUND");
+      const current = await tx.inventoryItem.findUnique({ where: { id } });
+      if (!current || !canAccessOwner(userId, current.clerk_user_id)) throw new Error("NOT_FOUND");
       if (parsed.data.counted_qty < current.reserved_qty) throw new Error("BELOW_RESERVED");
       const difference = parsed.data.counted_qty - current.on_hand_qty;
       const nextAverageCost =
@@ -40,7 +40,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       if (difference !== 0) {
         await tx.stockMovement.create({
           data: {
-            clerk_user_id: userId,
+            clerk_user_id: current.clerk_user_id,
             inventory_item_id: id,
             type: "COUNT_ADJUSTMENT",
             qty_change: difference,

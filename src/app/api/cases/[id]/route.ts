@@ -2,7 +2,7 @@ import { NextRequest } from "next/server";
 import { Prisma } from "@prisma/client";
 import { z } from "zod";
 import { prisma } from "@/lib/db";
-import { adminReadOnlyResponse, canAccessOwner, isAdminScope, requireAuth, unauthorizedResponse } from "@/lib/auth";
+import { canAccessOwner, isWriteForbiddenScope, requireAuth, requireWriteAuth, unauthorizedResponse, writeForbiddenResponse } from "@/lib/auth";
 import { recalcTotals } from "@/lib/recalc";
 import { apiError } from "@/lib/api-error";
 import { auditData, getAuditActor } from "@/lib/audit";
@@ -70,15 +70,15 @@ export async function PATCH(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const userId = await requireAuth();
+  const userId = await requireWriteAuth();
   if (!userId) return unauthorizedResponse();
-  if (isAdminScope(userId)) return adminReadOnlyResponse();
+  if (isWriteForbiddenScope(userId)) return writeForbiddenResponse();
   const { id } = await params;
   const c = await prisma.case.findUnique({
     where: { id },
     select: { clerk_user_id: true, status: true },
   });
-  if (!c || c.clerk_user_id !== userId) return apiError("CASE_NOT_FOUND", "维修单不存在", 404);
+  if (!c || !canAccessOwner(userId, c.clerk_user_id)) return apiError("CASE_NOT_FOUND", "维修单不存在", 404);
   if (c.status === "CANCELED") {
     return apiError("CASE_READ_ONLY", "该维修单已结束，不能继续修改", 409);
   }

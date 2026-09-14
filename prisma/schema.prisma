@@ -53,6 +53,8 @@ model AppUser {
   password_hash      String
   role               AppUserRole  @default(USER)
   data_owner_id      String?      @unique
+  is_active          Boolean      @default(true)
+  can_write          Boolean      @default(true)
   failed_login_count Int          @default(0)
   locked_until       DateTime?
   sessions           AppSession[]

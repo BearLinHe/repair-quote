@@ -1,15 +1,15 @@
 import { prisma } from "@/lib/db";
-import { adminReadOnlyResponse, isAdminScope, requireAuth, unauthorizedResponse } from "@/lib/auth";
+import { canAccessOwner, isWriteForbiddenScope, requireWriteAuth, unauthorizedResponse, writeForbiddenResponse } from "@/lib/auth";
 import { apiError } from "@/lib/api-error";
 import { auditData, getAuditActor } from "@/lib/audit";
 
 export async function POST(_req: Request, { params }: { params: Promise<{ id: string }> }) {
-  const userId = await requireAuth();
+  const userId = await requireWriteAuth();
   if (!userId) return unauthorizedResponse();
-  if (isAdminScope(userId)) return adminReadOnlyResponse();
+  if (isWriteForbiddenScope(userId)) return writeForbiddenResponse();
   const { id } = await params;
-  const order = await prisma.purchaseOrder.findFirst({ where: { id, clerk_user_id: userId } });
-  if (!order) return apiError("PURCHASE_NOT_FOUND", "采购单不存在", 404);
+  const order = await prisma.purchaseOrder.findUnique({ where: { id } });
+  if (!order || !canAccessOwner(userId, order.clerk_user_id)) return apiError("PURCHASE_NOT_FOUND", "采购单不存在", 404);
   if (order.status !== "DRAFT") return apiError("PURCHASE_NOT_DRAFT", "只有草稿采购单可以取消", 409);
   const actor = await getAuditActor(userId);
   const updated = await prisma.$transaction(async (tx) => {

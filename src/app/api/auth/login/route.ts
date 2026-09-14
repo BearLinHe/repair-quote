@@ -13,6 +13,7 @@ export async function POST(req: Request) {
   if (!parsed.success) return apiError("VALIDATION_ERROR", "请输入账号和密码", 400);
   const login = parsed.data.login.toLowerCase();
   const user = await prisma.appUser.findUnique({ where: { login } });
+  if (user && !user.is_active) return apiError("ACCOUNT_DISABLED", "该账号已停用，请联系管理员", 403);
   if (user?.locked_until && user.locked_until > new Date()) return apiError("ACCOUNT_LOCKED", "登录失败次数过多，请15分钟后再试", 429);
   const passwordMatches = await verifyPassword(parsed.data.password, user?.password_hash ?? DUMMY_HASH);
   if (!user || !passwordMatches) {

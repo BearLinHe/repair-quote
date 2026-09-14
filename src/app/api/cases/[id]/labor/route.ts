@@ -2,7 +2,7 @@ import { NextRequest } from "next/server";
 import { z } from "zod";
 import { Decimal } from "@prisma/client/runtime/library";
 import { prisma } from "@/lib/db";
-import { requireAuth, unauthorizedResponse } from "@/lib/auth";
+import { canAccessOwner, isWriteForbiddenScope, requireWriteAuth, unauthorizedResponse, writeForbiddenResponse } from "@/lib/auth";
 import { recalcTotals } from "@/lib/recalc";
 import { apiError } from "@/lib/api-error";
 import { canEditCaseDetails } from "@/lib/case-rules";
@@ -11,7 +11,7 @@ import { syncCompletedInvoice } from "@/lib/invoice-record";
 
 async function checkCase(id: string, userId: string) {
   const c = await prisma.case.findUnique({ where: { id }, select: { clerk_user_id: true, status: true } });
-  return c && c.clerk_user_id === userId ? c.status : null;
+  return c && canAccessOwner(userId, c.clerk_user_id) ? c.status : null;
 }
 
 function editAccessError(status: Awaited<ReturnType<typeof checkCase>>) {
@@ -39,8 +39,9 @@ export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const userId = await requireAuth();
+  const userId = await requireWriteAuth();
   if (!userId) return unauthorizedResponse();
+  if (isWriteForbiddenScope(userId)) return writeForbiddenResponse();
   const { id } = await params;
   const caseStatus = await checkCase(id, userId);
   const accessError = editAccessError(caseStatus);
@@ -80,8 +81,9 @@ export async function PUT(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const userId = await requireAuth();
+  const userId = await requireWriteAuth();
   if (!userId) return unauthorizedResponse();
+  if (isWriteForbiddenScope(userId)) return writeForbiddenResponse();
   const { id } = await params;
   const caseStatus = await checkCase(id, userId);
   const accessError = editAccessError(caseStatus);
@@ -129,8 +131,9 @@ export async function DELETE(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const userId = await requireAuth();
+  const userId = await requireWriteAuth();
   if (!userId) return unauthorizedResponse();
+  if (isWriteForbiddenScope(userId)) return writeForbiddenResponse();
   const { id } = await params;
   const caseStatus = await checkCase(id, userId);
   const accessError = editAccessError(caseStatus);
