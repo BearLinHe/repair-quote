@@ -4,10 +4,10 @@ import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import {
   canAccessOwner,
+  getCurrentAccount,
   isAdminScope,
   isWriteForbiddenScope,
   ownerWhere,
-  requireAuth,
   requireWriteAuth,
   unauthorizedResponse,
   writeForbiddenResponse,
@@ -17,7 +17,9 @@ import { auditData, getAuditActor } from "@/lib/audit";
 import { invoicePaidCents as centsPaid } from "@/lib/payment-reconciliation";
 
 export async function GET(req: NextRequest) {
-  const userId = await requireAuth();
+  const currentAccount = await getCurrentAccount();
+  if (!currentAccount) return unauthorizedResponse();
+  const userId = currentAccount.role === "ADMIN" ? "__ADMIN__" : currentAccount.dataOwnerId;
   if (!userId) return unauthorizedResponse();
 
   const params = new URL(req.url).searchParams;
@@ -113,6 +115,7 @@ export async function GET(req: NextRequest) {
     },
     bill_to_options: billToCases.map((item) => item.bill_to_company?.trim()).filter((value): value is string => Boolean(value)),
     can_filter_accounts: admin,
+    can_write: admin || Boolean(currentAccount?.canWrite),
     accounts: accounts.map((account) => ({ id: account.data_owner_id, name: account.name, login: account.login })),
   });
 }

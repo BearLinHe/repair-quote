@@ -16,6 +16,7 @@ import { formatCents } from "@/lib/utils";
 import type { CaseStatus } from "@prisma/client";
 import { canEditCaseDetails } from "@/lib/case-rules";
 import { apiErrorMessage } from "@/lib/api-error";
+import { BillToCombobox } from "@/components/bill-to-combobox";
 
 type LaborRow = {
   id: string;
@@ -511,8 +512,8 @@ export function CaseDetail({ caseData }: { caseData: CaseData }) {
         </CardHeader>
         <CardContent className="grid gap-5 p-5 text-sm sm:grid-cols-2 sm:p-6 lg:grid-cols-4 lg:items-end">
           <div className="grid gap-2">
-            <label className="text-xs font-medium uppercase tracking-wide text-muted-foreground">公司名称 *</label>
-            <Input value={billToCompany} onChange={(event) => setBillToCompany(event.target.value)} disabled={status === "CANCELED"} />
+            <label htmlFor="bill-to-company" className="text-xs font-medium uppercase tracking-wide text-muted-foreground">公司名称 *</label>
+            <BillToCombobox id="bill-to-company" value={billToCompany} onChange={setBillToCompany} disabled={status === "CANCELED"} required />
           </div>
           <div className="grid gap-2">
             <label className="text-xs font-medium uppercase tracking-wide text-muted-foreground">负责人</label>

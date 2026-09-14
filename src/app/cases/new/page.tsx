@@ -9,6 +9,7 @@ import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { apiErrorMessage } from "@/lib/api-error";
 import { DateTimePicker } from "@/components/ui/date-picker";
+import { BillToCombobox } from "@/components/bill-to-combobox";
 
 export default function NewCasePage() {
   const router = useRouter();
@@ -126,11 +127,10 @@ export default function NewCasePage() {
               <div className="mt-4 grid gap-5 sm:grid-cols-2">
                 <div className="grid gap-2">
                   <Label htmlFor="bill-to-company">公司名称 *</Label>
-                  <Input
+                  <BillToCombobox
                     id="bill-to-company"
                     value={billToCompany}
-                    onChange={(e) => setBillToCompany(e.target.value)}
-                    placeholder="客户公司名称"
+                    onChange={setBillToCompany}
                     required
                     className="min-h-[44px] sm:min-h-[40px]"
                   />
