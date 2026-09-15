@@ -19,6 +19,7 @@ type PaymentDetail = {
     amount_cents: number;
     allocated_cents: number;
     remaining_cents: number;
+    revision: number;
   };
   invoices: AllocationInvoice[];
   can_write: boolean;
@@ -79,7 +80,7 @@ export function ContinuePaymentDialog({ paymentId, onClose, onSaved }: {
       const response = await fetch(`/api/reconciliation/${payment.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ expected_allocated_cents: payment.allocated_cents, allocations: selected }),
+        body: JSON.stringify({ expected_revision: payment.revision, expected_allocated_cents: payment.allocated_cents, allocations: selected }),
       });
       const result = await response.json().catch(() => null);
       if (!response.ok) {

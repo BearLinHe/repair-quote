@@ -68,6 +68,7 @@ export function planPaymentAllocation(input: {
 export async function allocateExistingPayment(tx: Prisma.TransactionClient, input: {
   paymentId: string;
   expectedAllocatedCents: number;
+  expectedRevision?: number;
   allocations: Allocation[];
   scope: { ownerId: string; isAdmin: boolean };
   actor: { userId: string; name: string; email: string | null };
@@ -75,6 +76,10 @@ export async function allocateExistingPayment(tx: Prisma.TransactionClient, inpu
   const payment = await tx.customerPayment.findUnique({ where: { id: input.paymentId }, include: { allocations: true } });
   if (!payment || (!input.scope.isAdmin && payment.clerk_user_id !== input.scope.ownerId)) {
     throw new ReconciliationError("PAYMENT_NOT_FOUND", "收款记录不存在或无权操作", 404);
+  }
+  if (payment.voided_at) throw new ReconciliationError("PAYMENT_VOIDED", "该收款已作废，不能继续销账", 409);
+  if (input.expectedRevision !== undefined && input.expectedRevision !== payment.revision) {
+    throw new ReconciliationError("STALE_PAYMENT", "收款分配已发生变动，请刷新后重试", 409);
   }
   const invoices = await tx.invoiceRecord.findMany({
     where: { id: { in: input.allocations.map((item) => item.invoice_id) } },
@@ -89,7 +94,7 @@ export async function allocateExistingPayment(tx: Prisma.TransactionClient, inpu
     });
     await tx.invoiceRecord.update({ where: { id: update.invoice_id }, data: { payment_status: update.payment_status } });
   }
-  await tx.customerPayment.update({ where: { id: payment.id }, data: { updated_at: new Date() } });
+  await tx.customerPayment.update({ where: { id: payment.id }, data: { revision: { increment: 1 }, updated_at: new Date() } });
   await tx.auditLog.create({ data: {
     actor_user_id: input.actor.userId,
     actor_name: input.actor.name,
@@ -104,7 +109,7 @@ export async function allocateExistingPayment(tx: Prisma.TransactionClient, inpu
       newly_allocated_cents: plan.total,
       allocated_cents: plan.allocatedCents,
       remaining_cents: plan.remainingCents,
-      allocations: input.allocations,
+      allocations: input.allocations.map((item) => ({ ...item, invoice_number: invoices.find((invoice) => invoice.id === item.invoice_id)!.invoice_number })),
     },
   } });
   return { payment_id: payment.id, allocated_cents: plan.allocatedCents, remaining_cents: plan.remainingCents };

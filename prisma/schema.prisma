@@ -296,6 +296,10 @@ model CustomerPayment {
   created_by_user_id String
   created_by_name    String
   created_by_email   String?
+  revision           Int      @default(0)
+  voided_at          DateTime?
+  void_reason        String?
+  voided_by_name     String?
 
   allocations PaymentAllocation[]
 

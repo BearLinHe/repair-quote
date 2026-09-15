@@ -56,7 +56,8 @@ export function allocateVisibleInvoices(invoices: AllocationInvoice[], visible: 
   return next;
 }
 
-export function receiptAllocationStatus(amount: number, allocated: number) {
+export function receiptAllocationStatus(amount: number, allocated: number, voided = false) {
+  if (voided) return { key: "voided", label: "已作废" };
   if (allocated <= 0) return { key: "unallocated", label: "待分配" };
   if (allocated < amount) return { key: "partial", label: "部分分配" };
   return { key: "allocated", label: "全部分配" };

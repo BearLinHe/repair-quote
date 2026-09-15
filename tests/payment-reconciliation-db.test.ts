@@ -62,9 +62,9 @@ test("legacy 32-character invoice ID passes request validation and persists part
         clerk_user_id: ownerId, bill_to_company: "Legacy ID Test", received_at: new Date(),
         amount_cents: 48000, payment_method: "TEST", created_by_user_id: ownerId, created_by_name: "Test",
       } });
-      const parsed = continuePaymentSchema.parse({ expected_allocated_cents: 0, allocations: [{ invoice_id: invoice.id, amount_cents: 48000 }] });
+      const parsed = continuePaymentSchema.parse({ expected_revision: 0, expected_allocated_cents: 0, allocations: [{ invoice_id: invoice.id, amount_cents: 48000 }] });
       const result = await allocateExistingPayment(tx, {
-        paymentId: payment.id, expectedAllocatedCents: parsed.expected_allocated_cents, allocations: parsed.allocations,
+        paymentId: payment.id, expectedRevision: parsed.expected_revision, expectedAllocatedCents: parsed.expected_allocated_cents, allocations: parsed.allocations,
         scope: { ownerId, isAdmin: false }, actor: { userId: ownerId, name: "Test", email: null },
       });
       const saved = await tx.invoiceRecord.findUniqueOrThrow({ where: { id: invoice.id }, include: { allocations: true } });

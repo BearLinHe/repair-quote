@@ -100,6 +100,7 @@ export async function GET(req: NextRequest) {
     invoices: openInvoices,
     payments: payments.map((payment) => ({
       ...payment,
+      allocations: payment.allocations.filter((allocation) => allocation.amount_cents > 0),
       allocated_cents: payment.allocations.reduce((sum, allocation) => sum + allocation.amount_cents, 0),
     })),
     summary: {
@@ -109,7 +110,7 @@ export async function GET(req: NextRequest) {
       received_cents: totalReceivable - totalOutstanding,
       outstanding_cents: totalOutstanding,
       unapplied_cents: payments.reduce(
-        (sum, payment) => sum + Math.max(0, payment.amount_cents - payment.allocations.reduce((allocated, item) => allocated + item.amount_cents, 0)),
+        (sum, payment) => sum + (payment.voided_at ? 0 : Math.max(0, payment.amount_cents - payment.allocations.reduce((allocated, item) => allocated + item.amount_cents, 0))),
         0,
       ),
     },
@@ -195,6 +196,7 @@ export async function POST(req: NextRequest) {
             amount_cents: data.amount_cents,
             allocated_cents: allocationTotal,
             invoice_count: data.allocations.length,
+            allocations: data.allocations.map((allocation) => ({ ...allocation, invoice_number: invoiceMap.get(allocation.invoice_id)!.invoice_number })),
           },
         }),
       });

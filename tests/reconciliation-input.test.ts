@@ -11,14 +11,14 @@ const allocation = (id = legacyId, amount = 48000) => ({ invoice_id: id, amount_
 test("both reconciliation entry points accept legacy hex and UUID invoice IDs unchanged", () => {
   for (const id of [legacyId, uuidId]) {
     const allocations = [allocation(id)];
-    assert.deepEqual(continuePaymentSchema.parse({ expected_allocated_cents: 0, allocations }).allocations, allocations);
+    assert.deepEqual(continuePaymentSchema.parse({ expected_revision: 0, expected_allocated_cents: 0, allocations }).allocations, allocations);
     assert.deepEqual(createPaymentSchema.parse({ ...receipt, allocations }).allocations, allocations);
   }
   assert.equal(createPaymentSchema.safeParse({ ...receipt, allocations: [allocation(legacyId, 24000), allocation(uuidId, 24000)] }).success, true);
 });
 
 test("legacy invoice can receive $480 against $584.76 without weakening balance or ownership checks", () => {
-  const parsed = continuePaymentSchema.parse({ expected_allocated_cents: 0, allocations: [allocation()] });
+  const parsed = continuePaymentSchema.parse({ expected_revision: 0, expected_allocated_cents: 0, allocations: [allocation()] });
   const invoice = {
     id: legacyId, invoice_number: "TEST-INVOICE", clerk_user_id: "test-owner",
     grand_total_cents: 58476, payment_status: "UNPAID", allocations: [],
@@ -42,7 +42,7 @@ test("legacy invoice can receive $480 against $584.76 without weakening balance 
 test("bad invoice identifiers are rejected with an ID error, not an amount error", () => {
   for (const id of ["", "123", "../../invoice", "x".repeat(32), legacyId.slice(1), `${legacyId}0`, ` ${legacyId}`, `${uuidId}extra`]) {
     for (const result of [
-      continuePaymentSchema.safeParse({ expected_allocated_cents: 0, allocations: [allocation(id)] }),
+      continuePaymentSchema.safeParse({ expected_revision: 0, expected_allocated_cents: 0, allocations: [allocation(id)] }),
       createPaymentSchema.safeParse({ ...receipt, allocations: [allocation(id)] }),
     ]) {
       assert.equal(result.success, false);
@@ -55,19 +55,19 @@ test("legacy compatibility still rejects invalid money and missing/stale-balance
   for (const amount of [0, -1, 1.5, NaN, Infinity, 2147483648, "48000", null]) {
     const allocations = [{ invoice_id: legacyId, amount_cents: amount }];
     for (const result of [
-      continuePaymentSchema.safeParse({ expected_allocated_cents: 0, allocations }),
+      continuePaymentSchema.safeParse({ expected_revision: 0, expected_allocated_cents: 0, allocations }),
       createPaymentSchema.safeParse({ ...receipt, allocations }),
     ]) {
       assert.equal(result.success, false);
       if (!result.success) assert.match(reconciliationInputError(result.error, "fallback"), /销账金额/);
     }
   }
-  assert.equal(continuePaymentSchema.safeParse({ expected_allocated_cents: 0, allocations: [] }).success, false);
+  assert.equal(continuePaymentSchema.safeParse({ expected_revision: 0, expected_allocated_cents: 0, allocations: [] }).success, false);
   assert.equal(createPaymentSchema.safeParse({ ...receipt, allocations: [] }).success, true);
-  const invalidBalance = continuePaymentSchema.safeParse({ allocations: [allocation()] });
+  const invalidBalance = continuePaymentSchema.safeParse({ expected_revision: 0, allocations: [allocation()] });
   assert.equal(invalidBalance.success, false);
   if (!invalidBalance.success) assert.match(reconciliationInputError(invalidBalance.error, "fallback"), /收款余额信息/);
   const tooMany = Array.from({ length: 501 }, () => allocation(legacyId, 1));
-  assert.equal(continuePaymentSchema.safeParse({ expected_allocated_cents: 0, allocations: tooMany }).success, false);
+  assert.equal(continuePaymentSchema.safeParse({ expected_revision: 0, expected_allocated_cents: 0, allocations: tooMany }).success, false);
   assert.equal(createPaymentSchema.safeParse({ ...receipt, allocations: tooMany }).success, false);
 });

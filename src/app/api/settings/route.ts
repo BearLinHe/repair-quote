@@ -19,7 +19,7 @@ export async function GET() {
   const [settings, currentUser, auditLogs, accounts] = await Promise.all([
     prisma.setting.findUnique({ where: { id: "default" } }),
     getAuditActor(userId),
-    prisma.auditLog.findMany({ where: isAdminScope(userId) ? {} : { actor_user_id: userId }, orderBy: { created_at: "desc" }, take: 100 }),
+    prisma.auditLog.findMany({ where: isAdminScope(userId) ? {} : { actor_user_id: { in: [userId, ...(account ? [account.id] : [])] } }, orderBy: { created_at: "desc" }, take: 100 }),
     isAdminScope(userId)
       ? prisma.appUser.findMany({ orderBy: [{ role: "desc" }, { created_at: "asc" }], select: { id: true, login: true, email: true, name: true, role: true, is_active: true, can_write: true, data_owner_id: true, created_at: true } })
       : Promise.resolve([]),

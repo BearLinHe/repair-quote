@@ -130,6 +130,8 @@ export default function SettingsPage() {
     INVOICE_PAYMENT_UPDATED: "修改 Invoice 付款状态",
     PAYMENT_RECONCILED: "登记收款并销账",
     PAYMENT_ALLOCATION_ADDED: "继续销账",
+    PAYMENT_ALLOCATION_ADJUSTED: "调整销账",
+    PAYMENT_VOIDED: "作废收款",
     ACCOUNT_PERMISSIONS_UPDATED: "修改账号权限",
   })[action] ?? action;
 

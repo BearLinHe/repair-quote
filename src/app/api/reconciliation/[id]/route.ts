@@ -20,10 +20,12 @@ export async function GET(_req: NextRequest, context: Context) {
     select: {
       id: true, bill_to_company: true, received_at: true, amount_cents: true,
       payment_method: true, reference_number: true, created_by_name: true,
+      revision: true, voided_at: true,
       allocations: { select: { amount_cents: true } },
     },
   });
   if (!payment) return apiError("PAYMENT_NOT_FOUND", "收款记录不存在或无权操作", 404);
+  if (payment.voided_at) return apiError("PAYMENT_VOIDED", "该收款已作废，不能继续销账", 409);
   // The receipt determines the company; invoice dates are deliberately unrestricted.
   const invoices = await prisma.invoiceRecord.findMany({
     where: {
@@ -63,6 +65,7 @@ export async function PATCH(req: NextRequest, context: Context) {
     const result = await prisma.$transaction((tx) => allocateExistingPayment(tx, {
       paymentId: id,
       expectedAllocatedCents: parsed.data.expected_allocated_cents,
+      expectedRevision: parsed.data.expected_revision,
       allocations: parsed.data.allocations,
       scope: { ownerId, isAdmin: account.role === "ADMIN" },
       actor: { userId: account.id, name: account.name, email: account.email },

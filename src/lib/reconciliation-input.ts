@@ -14,9 +14,25 @@ const allocationItemSchema = z.object({
 });
 
 export const continuePaymentSchema = z.object({
+  expected_revision: z.number().int().min(0),
   expected_allocated_cents: z.number().int().min(0).max(2147483647),
   allocations: z.array(allocationItemSchema).min(1).max(500),
 });
+
+export const changePaymentSchema = z.discriminatedUnion("action", [
+  z.object({
+    action: z.literal("adjust"),
+    expected_revision: z.number().int().min(0),
+    reason: z.string().trim().min(1).max(1000),
+    // These are replacement amounts, not increments. Omitted invoices are unchanged.
+    allocations: z.array(allocationItemSchema.extend({ amount_cents: z.number().int().min(0).max(2147483647) })).min(1).max(500),
+  }),
+  z.object({
+    action: z.literal("void"),
+    expected_revision: z.number().int().min(0),
+    reason: z.string().trim().min(1).max(1000),
+  }),
+]);
 
 export const createPaymentSchema = z.object({
   bill_to_company: z.string().trim().min(1).max(200),
@@ -29,7 +45,9 @@ export const createPaymentSchema = z.object({
   allocations: z.array(allocationItemSchema).max(500),
 });
 
-export function reconciliationInputError(error: z.ZodError, fallback: string) {
+export function reconciliationInputError(error: z.ZodError, fallback: string, allowZeroAllocation = false) {
+  if (error.issues.some((issue) => issue.path[0] === "reason")) return "请填写操作原因（最多 1000 字）";
+  if (error.issues.some((issue) => issue.path[0] === "expected_revision")) return "收款记录版本已失效，请刷新后重试";
   if (error.issues.some((issue) => issue.path.includes("invoice_id"))) {
     return "Invoice 标识格式不正确，请刷新账单列表后重试";
   }
@@ -37,6 +55,7 @@ export function reconciliationInputError(error: z.ZodError, fallback: string) {
     return "收款余额信息不正确，请刷新余额后重试";
   }
   if (error.issues.some((issue) => issue.path[0] === "allocations" && issue.path.includes("amount_cents"))) {
+    if (allowZeroAllocation) return "请填写有效的调整金额，允许填零，最多两位小数";
     return "请填写有效的 Invoice 销账金额，金额须大于零且最多两位小数";
   }
   if (error.issues.some((issue) => issue.path[0] === "allocations")) {
