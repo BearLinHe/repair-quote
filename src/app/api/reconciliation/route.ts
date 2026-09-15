@@ -1,5 +1,4 @@
 import { NextRequest } from "next/server";
-import { z } from "zod";
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import {
@@ -15,6 +14,7 @@ import {
 import { apiError } from "@/lib/api-error";
 import { auditData, getAuditActor } from "@/lib/audit";
 import { invoicePaidCents as centsPaid } from "@/lib/payment-reconciliation";
+import { createPaymentSchema, reconciliationInputError } from "@/lib/reconciliation-input";
 
 export async function GET(req: NextRequest) {
   const currentAccount = await getCurrentAccount();
@@ -120,23 +120,12 @@ export async function GET(req: NextRequest) {
   });
 }
 
-const createPaymentSchema = z.object({
-  bill_to_company: z.string().trim().min(1).max(200),
-  received_at: z.string().min(1),
-  amount_cents: z.number().int().positive(),
-  payment_method: z.string().trim().min(1).max(100),
-  reference_number: z.string().trim().max(200).optional().nullable(),
-  note: z.string().trim().max(1000).optional().nullable(),
-  account: z.string().trim().optional().nullable(),
-  allocations: z.array(z.object({ invoice_id: z.string().uuid(), amount_cents: z.number().int().positive() })),
-});
-
 export async function POST(req: NextRequest) {
   const userId = await requireWriteAuth();
   if (!userId) return unauthorizedResponse();
   if (isWriteForbiddenScope(userId)) return writeForbiddenResponse();
   const parsed = createPaymentSchema.safeParse(await req.json().catch(() => null));
-  if (!parsed.success) return apiError("VALIDATION_ERROR", "收款信息格式不正确", 400, parsed.error.flatten());
+  if (!parsed.success) return apiError("VALIDATION_ERROR", reconciliationInputError(parsed.error, "收款信息格式不正确"), 400, parsed.error.flatten());
 
   const data = parsed.data;
   const allocationTotal = data.allocations.reduce((sum, allocation) => sum + allocation.amount_cents, 0);

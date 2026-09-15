@@ -1,10 +1,10 @@
 import { NextRequest } from "next/server";
 import { Prisma } from "@prisma/client";
-import { z } from "zod";
 import { prisma } from "@/lib/db";
 import { getCurrentAccount, unauthorizedResponse, writeForbiddenResponse } from "@/lib/auth";
 import { apiError } from "@/lib/api-error";
 import { allocateExistingPayment, invoicePaidCents, ReconciliationError } from "@/lib/payment-reconciliation";
+import { continuePaymentSchema, reconciliationInputError } from "@/lib/reconciliation-input";
 
 type Context = { params: Promise<{ id: string }> };
 
@@ -50,14 +50,6 @@ export async function GET(_req: NextRequest, context: Context) {
   });
 }
 
-const allocationSchema = z.object({
-  expected_allocated_cents: z.number().int().min(0).max(2147483647),
-  allocations: z.array(z.object({
-    invoice_id: z.string().uuid(),
-    amount_cents: z.number().int().positive().max(2147483647),
-  })).min(1).max(500),
-});
-
 export async function PATCH(req: NextRequest, context: Context) {
   const account = await getCurrentAccount();
   if (!account) return unauthorizedResponse();
@@ -65,8 +57,8 @@ export async function PATCH(req: NextRequest, context: Context) {
   const ownerId = account.role === "ADMIN" ? "__ADMIN__" : account.dataOwnerId;
   if (!ownerId) return unauthorizedResponse();
   const { id } = await context.params;
-  const parsed = allocationSchema.safeParse(await req.json().catch(() => null));
-  if (!parsed.success) return apiError("VALIDATION_ERROR", "请填写有效的 Invoice 销账金额", 400);
+  const parsed = continuePaymentSchema.safeParse(await req.json().catch(() => null));
+  if (!parsed.success) return apiError("VALIDATION_ERROR", reconciliationInputError(parsed.error, "销账信息格式不正确，请刷新后重试"), 400, parsed.error.flatten());
   try {
     const result = await prisma.$transaction((tx) => allocateExistingPayment(tx, {
       paymentId: id,
