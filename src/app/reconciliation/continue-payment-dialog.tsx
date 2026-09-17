@@ -69,6 +69,9 @@ export function ContinuePaymentDialog({ paymentId, onClose, onSaved }: {
   const payment = data?.payment;
   const { selected, total, remaining, invalid: hasInvalidAmount } = allocationTotals(data?.invoices ?? [], amounts, payment?.remaining_cents ?? 0);
   const disabled = loading || saving || needsRefresh || !data?.can_write;
+  const feedback = needsRefresh ? "请先刷新余额后重试" : !data?.can_write && !loading ? "当前账号为只读权限"
+    : hasInvalidAmount ? "请检查标红的账单金额" : remaining < 0 ? "本次分配超过可用余额"
+    : !total && payment?.remaining_cents ? "请填写需要销账的金额" : "";
 
   const save = async () => {
     if (submitting.current || disabled || !payment || !total || remaining < 0 || hasInvalidAmount) return;
@@ -131,7 +134,7 @@ export function ContinuePaymentDialog({ paymentId, onClose, onSaved }: {
 
         <div className="flex shrink-0 flex-wrap items-center justify-between gap-4 border-t bg-muted/15 px-4 py-4 sm:px-6">
           <div aria-live="polite" className="flex flex-wrap gap-x-5 gap-y-2 text-sm"><div><span className="text-muted-foreground">本次分配</span><strong className="ml-2 tabular-nums">{formatCents(total)}</strong></div><div><span className="text-muted-foreground">分配后剩余</span><strong className={`ml-2 tabular-nums ${remaining < 0 ? "text-destructive" : "text-primary"}`}>{formatCents(remaining)}</strong></div></div>
-          <div className="flex w-full justify-end gap-2 sm:w-auto"><Dialog.Close asChild><Button variant="outline" disabled={saving}>关闭</Button></Dialog.Close><Button className="flex-1 sm:flex-none" onClick={() => void save()} disabled={disabled || !total || remaining < 0 || hasInvalidAmount}>{saving ? "正在销账…" : "确认销账"}</Button></div>
+          <div className="w-full sm:w-auto">{feedback && <p id="continue-save-feedback" aria-live="polite" className={"mb-2 text-xs sm:text-right " + (hasInvalidAmount || remaining < 0 ? "text-destructive" : "text-muted-foreground")}>{feedback}</p>}<div className="flex justify-end gap-2"><Dialog.Close asChild><Button variant="outline" disabled={saving}>关闭</Button></Dialog.Close><Button className="flex-1 sm:flex-none" aria-describedby={feedback ? "continue-save-feedback" : undefined} onClick={() => void save()} disabled={disabled || !total || remaining < 0 || hasInvalidAmount}>{saving ? "正在销账…" : "确认销账"}</Button></div></div>
         </div>
       </Dialog.Content>
     </Dialog.Portal>

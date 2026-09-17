@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { planPaymentChange } from "../src/lib/payment-adjustment";
-import { adjustmentPreview, AdjustmentInvoice } from "../src/lib/payment-adjustment-view";
+import { adjustmentPreview, adjustmentFeedback, filterAdjustmentInvoices, AdjustmentInvoice } from "../src/lib/payment-adjustment-view";
 import { ReconciliationError } from "../src/lib/payment-reconciliation";
 import { changePaymentSchema, continuePaymentSchema, reconciliationInputError } from "../src/lib/reconciliation-input";
 import { receiptAllocationStatus } from "../src/lib/reconciliation-view";
@@ -134,4 +134,24 @@ test("adjustment UI calculates replacement differences, not additive allocations
   assert.equal(adjustmentPreview(viewInvoices, { [invoiceA]: "104.77", [invoiceB]: "0" }, 13600, 13600).invalid, true);
   assert.equal(adjustmentPreview(viewInvoices, { [invoiceA]: "bad", [invoiceB]: "0" }, 13600, 13600).invalid, true);
   assert.equal(adjustmentPreview(viewInvoices, { [invoiceA]: "104.76", [invoiceB]: "50" }, 13600, 13600).invalid, true);
+});
+
+test("adjustment views prioritize linked invoices and retain amounts when filtering", () => {
+  const unallocated = { ...viewInvoices[1], id: "unallocated", allocated_cents: 0, invoice_number: "INV-NEW" };
+  const invoices = [unallocated, ...viewInvoices];
+  const amounts = { [invoiceA]: "0", [invoiceB]: "31.24", unallocated: "25" };
+  assert.deepEqual(filterAdjustmentInvoices(invoices, amounts, "allocated", "").map((invoice) => invoice.id), [invoiceA, invoiceB]);
+  assert.deepEqual(filterAdjustmentInvoices(invoices, amounts, "all", "").map((invoice) => invoice.id), [invoiceA, invoiceB, "unallocated"]);
+  assert.deepEqual(filterAdjustmentInvoices(invoices, amounts, "changed", "").map((invoice) => invoice.id), [invoiceA, "unallocated"]);
+  assert.equal(filterAdjustmentInvoices(invoices, amounts, "all", "inv-new")[0].id, "unallocated");
+  assert.equal(invoices[0].id, "unallocated");
+  assert.equal(amounts[invoiceA], "0");
+  assert.equal(filterAdjustmentInvoices(invoices, { ...amounts, [invoiceB]: "bad" }, "changed", "").length, 3);
+});
+
+test("adjustment feedback explains empty and invalid submissions without blocking full withdrawal", () => {
+  assert.equal(adjustmentFeedback(adjustmentPreview(viewInvoices, {}, 13600, 13600)), "");
+  assert.match(adjustmentFeedback(adjustmentPreview(viewInvoices, { [invoiceA]: "104.76", [invoiceB]: "31.24" }, 13600, 13600)), /尚未修改/);
+  assert.match(adjustmentFeedback(adjustmentPreview(viewInvoices, { [invoiceA]: "104.76", [invoiceB]: "32" }, 13600, 13600)), /超过收款/);
+  assert.match(adjustmentFeedback(adjustmentPreview(viewInvoices, { [invoiceA]: "bad", [invoiceB]: "0" }, 13600, 13600)), /标红/);
 });

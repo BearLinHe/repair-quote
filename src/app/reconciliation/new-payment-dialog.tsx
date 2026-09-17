@@ -36,6 +36,7 @@ export function NewPaymentDialog({ accounts, admin, onClose, onSaved }: {
   const amountCents = parsePaymentCents(amount);
   const totals = allocationTotals(invoices, amounts, amountCents ?? 0);
   const valid = Boolean(company && companies.includes(company) && amountCents && amountCents > 0 && receivedAt && method.trim());
+  const missingFields = [!company || !companies.includes(company) ? "Bill To 公司" : "", !amountCents || amountCents <= 0 ? "有效收款金额" : "", !receivedAt ? "收款日期" : "", !method.trim() ? "付款方式" : ""].filter(Boolean);
 
   useEffect(() => {
     const abort = new AbortController();
@@ -140,6 +141,7 @@ export function NewPaymentDialog({ accounts, admin, onClose, onSaved }: {
           </>}
         </div>
         <div className={`shrink-0 space-y-3 border-t bg-muted/15 px-4 py-4 sm:px-6 ${step === "allocation" ? "lg:flex lg:items-center lg:justify-between lg:gap-5 lg:space-y-0" : ""}`}>
+          {step === "receipt" && !loadingCompanies && missingFields.length > 0 && <p aria-live="polite" className="text-xs text-muted-foreground">待填写：{missingFields.join("、")}</p>}
           {step === "allocation" && <div aria-live="polite" className="flex flex-wrap justify-between gap-x-5 gap-y-2 text-sm"><span>本次分配 <strong className="ml-2 tabular-nums">{formatCents(totals.total)}</strong></span><span>{totals.remaining < 0 ? "超出收款" : "分配后剩余"} <strong className={`ml-2 tabular-nums ${totals.remaining < 0 ? "text-destructive" : "text-primary"}`}>{formatCents(Math.abs(totals.remaining))}</strong></span></div>}
           {uncertain ? <Button className="w-full" variant="outline" onClick={close}>返回收款记录核对</Button> : <div className="flex flex-wrap justify-between gap-3">
             {step === "allocation" ? <Button variant="ghost" disabled={saving} onClick={() => { setStep("receipt"); setAmounts({}); setError(""); }}><ArrowLeft className="size-4" />上一步</Button> : <Button className="hidden sm:inline-flex" variant="ghost" disabled={saving || loadingInvoices} onClick={close}>取消</Button>}

@@ -2,12 +2,12 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import * as Dialog from "@radix-ui/react-dialog";
-import { AlertTriangle, RefreshCw, Search, Undo2, X } from "lucide-react";
+import { AlertTriangle, ArrowRight, Check, Loader2, RefreshCw, RotateCcw, Search, Undo2, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { apiErrorMessage } from "@/lib/api-error";
 import { formatCents } from "@/lib/utils";
-import { AdjustmentInvoice, adjustmentPreview } from "@/lib/payment-adjustment-view";
+import { AdjustmentFilter, AdjustmentInvoice, adjustmentFeedback, adjustmentPreview, filterAdjustmentInvoices } from "@/lib/payment-adjustment-view";
 import { parsePaymentCents } from "@/lib/reconciliation-view";
 
 export type PaymentManagementAction = "adjust" | "void" | "history";
@@ -27,6 +27,10 @@ export function ManagePaymentDialog({ paymentId, action, onClose, onSaved }: {
   const [amounts, setAmounts] = useState<Record<string, string>>({});
   const [reason, setReason] = useState("");
   const [query, setQuery] = useState("");
+  const [filter, setFilter] = useState<AdjustmentFilter>("allocated");
+  const [reasonError, setReasonError] = useState(false);
+  const [discarding, setDiscarding] = useState(false);
+  const reasonInput = useRef<HTMLTextAreaElement>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
@@ -45,6 +49,7 @@ export function ManagePaymentDialog({ paymentId, action, onClose, onSaved }: {
       if (version !== requestVersion.current) return;
       setData(payload);
       setAmounts(Object.fromEntries((payload.invoices as AdjustmentInvoice[]).map((invoice) => [invoice.id, invoice.allocated_cents ? (invoice.allocated_cents / 100).toFixed(2) : ""])));
+      setReasonError(false); setDiscarding(false);
       setNeedsRefresh(false);
     } catch (cause) {
       if (version !== requestVersion.current) return;
@@ -56,11 +61,29 @@ export function ManagePaymentDialog({ paymentId, action, onClose, onSaved }: {
   const payment = data?.payment;
   const invoices = useMemo(() => data?.invoices ?? [], [data]);
   const preview = adjustmentPreview(invoices, amounts, payment?.amount_cents ?? 0, payment?.allocated_cents ?? 0);
-  const visible = invoices.filter((invoice) => `${invoice.invoice_number} ${invoice.case.plate ?? ""} ${invoice.case.unit_number ?? ""}`.toLowerCase().includes(query.trim().toLowerCase()));
+  const visible = filterAdjustmentInvoices(invoices, amounts, filter, query);
   const hiddenChanges = preview.changes.filter((change) => !visible.some((invoice) => invoice.id === change.invoice_id)).length;
   const disabled = loading || saving || needsRefresh || !data?.can_write;
+  const editable = Boolean(data && action !== "history" && !payment?.voided_at);
+  const feedback = action === "adjust" ? adjustmentFeedback(preview) : "";
+  const withdrawn = preview.changes.reduce((sum, item) => sum + Math.max(0, item.before_cents - item.amount_cents), 0);
+  const added = preview.changes.reduce((sum, item) => sum + Math.max(0, item.amount_cents - item.before_cents), 0);
+  const dirty = editable && (preview.changes.length > 0 || preview.invalid || Boolean(reason.trim()));
+  const close = () => {
+    if (submitting.current) return;
+    if (dirty) setDiscarding(true);
+    else onClose();
+  };
+  const resetAmounts = () => {
+    setAmounts(Object.fromEntries(invoices.map((invoice) => [invoice.id, invoice.allocated_cents ? (invoice.allocated_cents / 100).toFixed(2) : ""])));
+    setError("");
+  };
+  const changeAmount = (id: string, value: string) => {
+    setAmounts((current) => ({ ...current, [id]: value })); setError("");
+  };
   const save = async () => {
-    if (submitting.current || disabled || !payment || action === "history" || !reason.trim() || (action === "adjust" && (preview.invalid || !preview.changes.length))) return;
+    if (submitting.current || disabled || !payment || action === "history" || feedback) return;
+    if (!reason.trim()) { setReasonError(true); reasonInput.current?.focus(); return; }
     submitting.current = true; setSaving(true); setError("");
     try {
       const response = await fetch(`/api/reconciliation/${paymentId}/adjustment`, {
@@ -81,55 +104,77 @@ export function ManagePaymentDialog({ paymentId, action, onClose, onSaved }: {
     } finally { submitting.current = false; setSaving(false); }
   };
 
-  return <Dialog.Root open onOpenChange={(open) => { if (!open && !submitting.current) onClose(); }}>
+  return <Dialog.Root open onOpenChange={(open) => { if (!open) close(); }}>
     <Dialog.Portal>
-      <Dialog.Overlay className="fixed inset-0 z-50 bg-black/35 backdrop-blur-sm" />
-      <Dialog.Content className="fixed left-1/2 top-1/2 z-50 flex max-h-[92dvh] w-[calc(100%-24px)] max-w-6xl -translate-x-1/2 -translate-y-1/2 flex-col overflow-hidden rounded-2xl border bg-card shadow-2xl" onInteractOutside={(event) => event.preventDefault()}>
-        <div className="shrink-0 border-b px-4 py-4 sm:px-6">
-          <div className="flex items-center justify-between gap-3"><Dialog.Title className="text-lg font-bold">{titles[action]}</Dialog.Title><Button variant="ghost" size="sm" disabled={saving} aria-label="关闭收款管理窗口" onClick={onClose}><X className="size-4" /></Button></div>
+      <Dialog.Overlay className="fixed inset-0 z-50 bg-black/40" />
+      <Dialog.Content className={"fixed left-1/2 top-1/2 z-50 flex w-[calc(100%-24px)] -translate-x-1/2 -translate-y-1/2 flex-col overflow-hidden rounded-2xl border bg-card shadow-2xl " + (action === "adjust" ? "h-[min(90dvh,760px)] max-w-7xl" : "h-[min(85dvh,600px)] max-w-4xl")} onInteractOutside={(event) => event.preventDefault()}>
+        <div className="shrink-0 border-b px-4 py-3 sm:px-5">
+          <div className="flex items-center justify-between gap-3"><Dialog.Title className="text-lg font-bold">{titles[action]}{editable && preview.changes.length > 0 && <span className="ml-3 rounded-md bg-amber-500/10 px-2 py-1 text-xs font-normal text-amber-700 dark:text-amber-400">未保存</span>}</Dialog.Title><Button variant="ghost" size="sm" disabled={saving} aria-label="关闭收款管理窗口" onClick={close}><X className="size-4" /></Button></div>
           <Dialog.Description className="sr-only">调整会更新 Invoice 已付及欠款，作废不会删除原收款，所有操作都会留档。</Dialog.Description>
-          {payment && <div className="mt-3 flex flex-wrap items-start justify-between gap-4">
+          {payment && <div className="mt-2 flex flex-wrap items-start justify-between gap-3">
             <div className="min-w-0"><p className="break-words font-semibold">{payment.bill_to_company}</p><p className="mt-1 text-xs text-muted-foreground">{new Date(payment.received_at).toLocaleDateString("zh-CN")} · {payment.payment_method}{payment.reference_number && ` · ${payment.reference_number}`}</p></div>
             <div className="flex flex-wrap gap-5 text-sm">{[["原收款", payment.amount_cents], ["当前已分配", payment.allocated_cents], ["当前待分配", payment.remaining_cents]].map(([label, amount]) => <div key={label}><p className="text-xs text-muted-foreground">{label}</p><p className="mt-1 font-semibold tabular-nums">{formatCents(Number(amount))}</p></div>)}</div>
           </div>}
         </div>
-        <div className="min-h-0 flex-1 space-y-5 overflow-y-auto px-4 py-5 sm:px-6">
+        <div className="flex min-h-0 flex-1 flex-col overflow-hidden lg:flex-row">
+        <div className="min-h-0 min-w-0 flex-1 space-y-4 overflow-y-auto overscroll-contain px-4 py-4 sm:px-5" aria-label="可调整账单">
           {error && <p role="alert" className="rounded-lg border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive">{error}</p>}
           {needsRefresh && <Button variant="outline" size="sm" disabled={loading || saving} onClick={() => void load()}><RefreshCw className="size-4" />刷新记录</Button>}
           {loading ? <p className="py-12 text-center text-sm text-muted-foreground">正在加载收款明细…</p> : data && payment && <>
             {payment.voided_at && <div className="rounded-xl border bg-muted/40 p-4 text-sm"><p className="font-semibold">此收款已作废</p><p className="mt-1">{payment.void_reason}</p><p className="mt-2 text-xs text-muted-foreground">{payment.voided_by_name} · {new Date(payment.voided_at).toLocaleString("zh-CN", { hour12: false })}</p></div>}
             {action === "adjust" && !payment.voided_at && <>
-              <div className="flex flex-wrap items-center justify-between gap-3"><p className="text-sm text-muted-foreground">填写调整后的分配金额；填 0 撤回该张账单的分配。</p><Button variant="outline" size="sm" disabled={disabled || !payment.allocated_cents} onClick={() => { setAmounts({}); setError(""); }}><Undo2 className="size-4" />全部撤回</Button></div>
-              <div className="relative"><Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" /><Input aria-label="搜索调整账单" className="pl-9" placeholder="Invoice / 车牌 / 车号" value={query} onChange={(event) => setQuery(event.target.value)} /></div>
-              {hiddenChanges > 0 && <p className="text-sm text-primary">另有 {hiddenChanges} 张已修改账单被筛选隐藏，仍包含在本次调整中。<button type="button" className="ml-2 underline" onClick={() => setQuery("")}>显示全部</button></p>}
-              <div className="overflow-hidden rounded-xl border">
-                <div className="hidden grid-cols-[minmax(160px,1fr)_110px_110px_140px_120px] gap-3 border-b bg-muted/35 px-4 py-3 text-xs text-muted-foreground md:grid"><span>Invoice / 日期</span><span className="text-right">账单总额</span><span className="text-right">本收款原分配</span><span className="text-right">调整后分配</span><span className="text-right">调整后欠款</span></div>
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="inline-flex gap-1 rounded-lg bg-muted/60 p-1" aria-label="账单显示范围">{([["allocated", "已分配"], ["all", "全部账单"], ["changed", "已调整"]] as const).map(([value, label]) => <button key={value} type="button" aria-pressed={filter === value} onClick={() => setFilter(value)} className={"rounded-md px-2.5 py-1.5 text-xs " + (filter === value ? "bg-card font-semibold shadow-sm" : "text-muted-foreground")}>{label}{value === "changed" && preview.changes.length > 0 ? " " + preview.changes.length : ""}</button>)}</div>
+                <div className="flex gap-1"><Button variant="ghost" size="sm" className="h-8 px-2 text-xs" disabled={disabled || (!preview.changes.length && !preview.invalid)} onClick={resetAmounts}><RotateCcw className="size-3.5" />恢复原值</Button><Button variant="outline" size="sm" className="h-8 px-2 text-xs" disabled={disabled || !payment.allocated_cents} onClick={() => { setAmounts({}); setError(""); }}><Undo2 className="size-3.5" />全部撤回</Button></div>
+              </div>
+              <div className="relative"><Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" /><Input aria-label="搜索调整账单" className="h-9 rounded-lg pl-9 shadow-none" placeholder="搜索 Invoice / 车牌 / 车号" value={query} onChange={(event) => setQuery(event.target.value)} /></div>
+              {hiddenChanges > 0 && <p className="text-sm text-primary">另有 {hiddenChanges} 张已修改账单被筛选隐藏，仍包含在本次调整中。<button type="button" className="ml-2 underline" onClick={() => { setFilter("changed"); setQuery(""); }}>查看已调整</button></p>}
+              <div className="rounded-xl border">
+                <div className="sticky top-[-16px] z-10 hidden grid-cols-[minmax(130px,1fr)_85px_85px_110px_95px] gap-3 border-b bg-muted px-4 py-3 text-xs text-muted-foreground md:grid"><span>Invoice / 日期</span><span className="text-right">账单总额</span><span className="text-right">原分配</span><span className="text-right">调整后分配</span><span className="text-right">调整后欠款</span></div>
                 <div className="divide-y">{visible.map((invoice) => {
                   const next = parsePaymentCents(amounts[invoice.id] ?? "");
                   const invalid = next === null || next > invoice.max_allocation_cents;
                   const delta = (next ?? 0) - invoice.allocated_cents;
-                  return <div key={invoice.id} className="grid grid-cols-2 gap-3 px-4 py-4 md:grid-cols-[minmax(160px,1fr)_110px_110px_140px_120px] md:items-center">
+                  return <div key={invoice.id} className={"grid grid-cols-2 gap-3 border-l-2 px-3 py-3 md:grid-cols-[minmax(130px,1fr)_85px_85px_110px_95px] md:items-center " + (invalid ? "border-l-destructive bg-destructive/5" : delta !== 0 ? "border-l-primary bg-primary/5" : "border-l-transparent")}>
                     <div className="col-span-2 min-w-0 md:col-span-1"><p className="break-all font-mono text-xs font-semibold">{invoice.invoice_number}</p><p className="mt-1 text-xs text-muted-foreground">{new Date(invoice.issued_at).toLocaleDateString("zh-CN")} · {invoice.case.plate || invoice.case.unit_number || "—"}</p></div>
                     <div className="text-sm md:text-right"><span className="mb-1 block text-xs text-muted-foreground md:hidden">账单总额</span>{formatCents(invoice.grand_total_cents)}</div>
                     <div className="text-sm md:text-right"><span className="mb-1 block text-xs text-muted-foreground md:hidden">本收款原分配</span>{formatCents(invoice.allocated_cents)}</div>
-                    <div><label htmlFor={`adjust-${invoice.id}`} className="mb-1 block text-xs text-muted-foreground md:hidden">调整后分配</label><Input id={`adjust-${invoice.id}`} aria-label={`Invoice ${invoice.invoice_number} 调整后分配金额`} inputMode="decimal" disabled={disabled} className="text-right tabular-nums" aria-invalid={invalid} value={amounts[invoice.id] ?? ""} placeholder="0.00" onChange={(event) => { setAmounts((current) => ({ ...current, [invoice.id]: event.target.value })); setError(""); }} />{invalid ? <p className="mt-1 text-xs text-destructive">金额无效或超过可分配额</p> : delta !== 0 && <p className={`mt-1 text-right text-xs ${delta < 0 ? "text-amber-600" : "text-primary"}`}>{delta < 0 ? "撤回" : "增加"} {formatCents(Math.abs(delta))}</p>}</div>
+                    <div><label htmlFor={`adjust-${invoice.id}`} className="mb-1 block text-xs text-muted-foreground md:hidden">调整后分配</label><Input id={`adjust-${invoice.id}`} aria-label={`Invoice ${invoice.invoice_number} 调整后分配金额`} inputMode="decimal" disabled={disabled} className={"h-9 rounded-lg text-right tabular-nums shadow-none " + (invalid ? "border-destructive" : "")} aria-invalid={invalid} value={amounts[invoice.id] ?? ""} placeholder="0.00" onChange={(event) => { setAmounts((current) => ({ ...current, [invoice.id]: event.target.value })); setError(""); }} />{invalid ? <p className="mt-1 text-xs text-destructive">金额无效或超过可分配额</p> : delta !== 0 && <p className={`mt-1 text-right text-xs ${delta < 0 ? "text-amber-600" : "text-primary"}`}>{delta < 0 ? "撤回" : "增加"} {formatCents(Math.abs(delta))}</p>}<div className="mt-1 flex justify-end">{delta !== 0 || invalid ? <button type="button" disabled={disabled} aria-label={"恢复 Invoice " + invoice.invoice_number + " 原分配"} className="text-xs text-muted-foreground hover:text-primary" onClick={() => changeAmount(invoice.id, invoice.allocated_cents ? (invoice.allocated_cents / 100).toFixed(2) : "")}>恢复原值</button> : invoice.allocated_cents > 0 && <button type="button" disabled={disabled} aria-label={"撤回 Invoice " + invoice.invoice_number + " 分配"} className="text-xs text-muted-foreground hover:text-primary" onClick={() => changeAmount(invoice.id, "0.00")}>撤回</button>}</div></div>
                     <div className="text-right text-sm font-medium tabular-nums"><span className="mb-1 block text-xs font-normal text-muted-foreground md:hidden">调整后欠款</span>{invalid ? "—" : formatCents(Math.max(0, invoice.grand_total_cents - invoice.other_paid_cents - (next ?? 0)))}</div>
                   </div>;
-                })}{!visible.length && <p className="p-8 text-center text-sm text-muted-foreground">没有匹配的 Invoice</p>}</div>
+                })}{!visible.length && <p className="p-8 text-center text-sm text-muted-foreground">{filter === "changed" && !query ? "尚未调整金额" : "没有匹配的 Invoice"}{filter !== "all" && <button type="button" className="ml-2 text-primary" onClick={() => setFilter("all")}>查看全部</button>}</p>}</div>
               </div>
             </>}
             {action === "void" && !payment.voided_at && <>
               <div className="flex items-start gap-3 rounded-xl border border-destructive/25 bg-destructive/5 p-4 text-sm"><AlertTriangle className="mt-0.5 size-5 shrink-0 text-destructive" /><div><p className="font-semibold">将作废这笔 {formatCents(payment.amount_cents)} 收款</p><p className="mt-1 text-muted-foreground">撤回已分配的 {formatCents(payment.allocated_cents)} 并恢复对应账单欠款。原收款及操作记录保留，不影响其他收款。此操作不会发起银行退款。</p></div></div>
               <div className="divide-y rounded-xl border">{invoices.filter((invoice) => invoice.allocated_cents > 0).map((invoice) => <div key={invoice.id} className="flex flex-wrap items-center justify-between gap-2 px-4 py-3 text-sm"><span className="font-mono text-xs">{invoice.invoice_number}</span><span>撤回 {formatCents(invoice.allocated_cents)} · 欠款恢复至 {formatCents(Math.max(0, invoice.grand_total_cents - invoice.other_paid_cents))}</span></div>)}{!payment.allocated_cents && <p className="p-4 text-sm text-muted-foreground">此收款尚未分配，不会改变 Invoice 已付金额。</p>}</div>
             </>}
-            {action !== "history" && !payment.voided_at && <div><label htmlFor="payment-change-reason" className="mb-2 block text-sm font-medium">{action === "void" ? "作废" : "调整"}原因 *</label><textarea id="payment-change-reason" required maxLength={1000} disabled={disabled} value={reason} onChange={(event) => setReason(event.target.value)} placeholder={action === "void" ? "例如：支票退票、重复登记" : "例如：分配错 Invoice，退回重新分配"} className="min-h-24 w-full resize-y rounded-xl border bg-background p-3 text-sm outline-none focus:ring-2 focus:ring-primary/25" /></div>}
             {action === "history" && <PaymentHistory events={data.events} />}
           </>}
         </div>
-        <div className="flex shrink-0 flex-wrap items-center justify-between gap-4 border-t bg-muted/15 px-4 py-4 sm:px-6">
-          {action === "adjust" && !payment?.voided_at ? <div aria-live="polite" className="flex flex-wrap gap-x-5 gap-y-2 text-sm"><span>调整后已分配 <b className="ml-1 tabular-nums">{formatCents(preview.total)}</b></span><span>调整后待分配 <b className={`ml-1 tabular-nums ${preview.remaining < 0 ? "text-destructive" : "text-primary"}`}>{formatCents(preview.remaining)}</b></span></div> : <span />}
-          <div className="flex w-full justify-end gap-2 sm:w-auto"><Button variant="outline" disabled={saving} onClick={onClose}>关闭</Button>{action !== "history" && !payment?.voided_at && <Button variant={action === "void" ? "destructive" : "default"} disabled={disabled || !reason.trim() || (action === "adjust" && (preview.invalid || !preview.changes.length))} onClick={() => void save()}>{saving ? "正在保存…" : action === "void" ? "确认作废收款" : "确认调整"}</Button>}</div>
+          {editable && <aside aria-label="确认本次操作" className="flex shrink-0 flex-col border-t bg-muted/20 p-3 lg:w-[300px] lg:border-l lg:border-t-0 lg:p-5">
+            {action === "adjust" && <>
+              <div className="mb-4 hidden items-center justify-between text-sm lg:flex"><h3 className="font-semibold">本次调整</h3><span className="text-muted-foreground">{preview.changes.length} 张账单</span></div>
+              <div className="mb-4 hidden grid-cols-2 gap-3 lg:grid"><div><p className="text-xs text-muted-foreground">撤回分配</p><p className="mt-1 text-lg font-semibold tabular-nums">{formatCents(withdrawn)}</p></div><div><p className="text-xs text-muted-foreground">新增分配</p><p className="mt-1 text-lg font-semibold tabular-nums">{formatCents(added)}</p></div></div>
+              <div aria-live="polite" className="mb-3 grid grid-cols-2 gap-3 border-b pb-3 text-sm lg:grid-cols-1 lg:pb-4">
+                <div><p className="text-xs text-muted-foreground">调整后已分配</p><p className="mt-1 flex items-center gap-2 font-semibold tabular-nums"><span className="hidden font-normal text-muted-foreground lg:inline">{formatCents(payment?.allocated_cents ?? 0)}</span><ArrowRight className="hidden size-3 text-muted-foreground lg:block" />{preview.invalid ? "—" : formatCents(preview.total)}</p></div>
+                <div><p className="text-xs text-muted-foreground">{preview.remaining < 0 ? "超出收款" : "调整后待分配"}</p><p className={"mt-1 flex items-center gap-2 font-semibold tabular-nums " + (preview.remaining < 0 ? "text-destructive" : "text-primary")}><span className="hidden font-normal text-muted-foreground lg:inline">{formatCents(payment?.remaining_cents ?? 0)}</span><ArrowRight className="hidden size-3 text-muted-foreground lg:block" />{formatCents(Math.abs(preview.remaining))}</p></div>
+              </div>
+            </>}
+            {discarding ? <div role="alert" className="space-y-3 rounded-lg border border-amber-500/30 bg-amber-500/5 p-3 text-sm"><p className="font-medium">还有未保存的修改</p><p className="text-muted-foreground">离开后不会生效，是否放弃？</p><div className="flex gap-2"><Button size="sm" variant="outline" onClick={() => setDiscarding(false)}>继续编辑</Button><Button size="sm" variant="ghost" onClick={onClose}>放弃修改</Button></div></div> : <>
+              <div><div className="mb-1.5 flex items-center justify-between"><label htmlFor="payment-change-reason" className="text-xs font-medium">{action === "void" ? "作废" : "调整"}原因 <span className="text-destructive">*</span></label><span className="text-xs text-muted-foreground">必填</span></div>
+                <textarea ref={reasonInput} id="payment-change-reason" required maxLength={1000} rows={1} disabled={disabled} aria-invalid={reasonError} aria-describedby={reasonError ? "payment-reason-error" : undefined} value={reason} onChange={(event) => { setReason(event.target.value); setReasonError(false); }} placeholder="填写原因，或选择下方常用原因" className={"h-10 w-full resize-none rounded-lg border bg-card px-3 py-2 text-sm outline-none focus:border-primary/50 focus:ring-2 focus:ring-primary/20 lg:h-24 " + (reasonError ? "border-destructive" : "border-input")} />
+                {reasonError && <p id="payment-reason-error" role="alert" className="mt-1 text-xs text-destructive">请填写{action === "void" ? "作废" : "调整"}原因后再确认</p>}
+                <div className="mt-2 flex flex-wrap gap-1.5">{(action === "void" ? ["支票退票", "重复登记", "收款信息有误"] : ["分配错误", "金额更正", "重新分配"]).map((item) => <button key={item} type="button" disabled={disabled} aria-pressed={reason === item} onClick={() => { setReason(item); setReasonError(false); }} className={"rounded-md border px-2 py-1 text-xs transition-colors disabled:opacity-50 " + (reason === item ? "border-primary/30 bg-primary/10 text-primary" : "border-border bg-card text-muted-foreground hover:border-primary/30 hover:text-foreground")}>{item}</button>)}</div>
+              </div>
+              <div className="mt-3 lg:mt-auto lg:pt-6">
+                <p id="payment-save-feedback" aria-live="polite" className={"mb-2 flex min-h-4 items-center gap-1.5 text-xs " + (preview.invalid ? "text-destructive" : "text-muted-foreground")}>{needsRefresh ? "记录已变动，请先刷新" : !data?.can_write ? "当前账号为只读权限" : feedback || (!reason.trim() ? "还需填写操作原因" : <><Check className="size-3.5 text-primary" />可以确认，保存后生效</>)}</p>
+                <div className="flex gap-2"><Button variant="outline" className="rounded-lg lg:flex-1" disabled={saving} onClick={close}>取消</Button><Button className="flex-1 rounded-lg" variant={action === "void" ? "destructive" : "default"} aria-describedby="payment-save-feedback" disabled={disabled || Boolean(feedback)} onClick={() => void save()}>{saving && <Loader2 className="size-4 animate-spin" />}{saving ? "保存中…" : action === "void" ? "确认作废收款" : "确认调整"}</Button></div>
+              </div>
+            </>}
+          </aside>}
         </div>
+        {!editable && <footer className="flex shrink-0 justify-end border-t px-4 py-3"><Button variant="outline" onClick={close}>关闭</Button></footer>}
       </Dialog.Content>
     </Dialog.Portal>
   </Dialog.Root>;
