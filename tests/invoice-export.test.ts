@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import ExcelJS from "exceljs";
 import { buildInvoiceExportBuffer } from "../src/lib/invoice-export";
+import { selectedInvoiceExportSchema } from "../src/lib/invoice-export-input";
 
 test("exports one formatted Excel row per invoice", async () => {
   const buffer = await buildInvoiceExportBuffer([{
@@ -44,4 +45,38 @@ test("exports one formatted Excel row per invoice", async () => {
   assert.equal(sheet.getCell("H2").alignment.horizontal, "left");
   assert.equal(sheet.getCell("A2").alignment.vertical, "middle");
   assert.ok(sheet.autoFilter);
+});
+
+test("mixed legacy and UUID selection exports all 89 invoices with matching amounts and invoice numbers", async () => {
+  const invoices = Array.from({ length: 89 }, (_, index) => ({
+    id: index < 32
+      ? index.toString(16).padStart(32, "0")
+      : `00000000-0000-4000-8000-${index.toString(16).padStart(12, "0")}`,
+    invoice_number: `TEST-${index + 1}`,
+    issued_at: new Date("2026-09-17T12:00:00Z"),
+    parts_revenue_cents: 10000 + index,
+    labor_revenue_cents: 2000,
+    cleaning_fee_cents: 1000,
+    tax_cents: 500,
+    grand_total_cents: 13500 + index,
+    payment_status: "UNPAID",
+    snapshot: {},
+    case: { bill_to_company: "Export Test", payment_method: "check", plate: null, unit_number: String(index + 1) },
+  }));
+  const selected = selectedInvoiceExportSchema.parse({ ids: invoices.map((invoice) => invoice.id) });
+  const selectedIds = new Set(selected.ids);
+  const buffer = await buildInvoiceExportBuffer(invoices.filter((invoice) => selectedIds.has(invoice.id)));
+  const workbook = new ExcelJS.Workbook();
+  await workbook.xlsx.load(buffer);
+  const sheet = workbook.getWorksheet("Invoice 明细");
+  assert.ok(sheet);
+  assert.equal(sheet.rowCount, 90);
+  let exportedTotalCents = 0;
+  invoices.forEach((invoice, index) => {
+    const row = sheet.getRow(index + 2);
+    assert.equal(row.getCell(5).value, invoice.grand_total_cents / 100);
+    assert.equal(row.getCell(8).value, `Invoice #${invoice.invoice_number}\n付款方式：check`);
+    exportedTotalCents += Math.round(Number(row.getCell(5).value) * 100);
+  });
+  assert.equal(exportedTotalCents, invoices.reduce((sum, invoice) => sum + invoice.grand_total_cents, 0));
 });

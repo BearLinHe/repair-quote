@@ -4,16 +4,13 @@ import { prisma } from "@/lib/db";
 import { ownerWhere, requireAuth, unauthorizedResponse } from "@/lib/auth";
 import { apiError } from "@/lib/api-error";
 import { buildInvoiceExportBuffer } from "@/lib/invoice-export";
+import { invoiceExportInputError, selectedInvoiceExportSchema } from "@/lib/invoice-export-input";
 
 export const runtime = "nodejs";
 
 const querySchema = z.object({
   start: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
   end: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
-});
-
-const selectedSchema = z.object({
-  ids: z.array(z.string().uuid()).min(1).max(300),
 });
 
 const invoiceInclude = {
@@ -63,8 +60,8 @@ export async function POST(req: NextRequest) {
   const userId = await requireAuth();
   if (!userId) return unauthorizedResponse();
 
-  const parsed = selectedSchema.safeParse(await req.json().catch(() => null));
-  if (!parsed.success) return apiError("VALIDATION_ERROR", "请选择需要导出的 Invoice", 400);
+  const parsed = selectedInvoiceExportSchema.safeParse(await req.json().catch(() => null));
+  if (!parsed.success) return apiError("VALIDATION_ERROR", invoiceExportInputError(parsed.error), 400);
 
   const invoices = await prisma.invoiceRecord.findMany({
     where: { ...ownerWhere(userId), id: { in: parsed.data.ids } },

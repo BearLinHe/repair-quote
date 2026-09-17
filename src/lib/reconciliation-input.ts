@@ -1,12 +1,5 @@
 import { z } from "zod";
-
-const uuidSchema = z.string().uuid();
-// Imported invoices use 32-character hex IDs; newer records use UUIDs.
-// Preserve the original ID: ownership and existence are checked in the transaction.
-const invoiceIdSchema = z.string().refine(
-  (id) => /^[0-9a-f]{32}$/i.test(id) || uuidSchema.safeParse(id).success,
-  "Invoice 标识格式不正确，请刷新账单列表后重试",
-);
+import { invoiceIdSchema } from "./invoice-id";
 
 const allocationItemSchema = z.object({
   invoice_id: invoiceIdSchema,
