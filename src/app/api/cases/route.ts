@@ -5,6 +5,7 @@ import { isWriteForbiddenScope, ownerWhere, requireAuth, requireWriteAuth, unaut
 import { apiError } from "@/lib/api-error";
 import { generateInvoiceNumber } from "@/lib/invoice-number";
 import { auditData, getAuditActor } from "@/lib/audit";
+import { caseListSelect, caseListWhere } from "@/lib/case-list-query";
 
 const querySchema = z.object({ query: z.string().optional() });
 
@@ -15,38 +16,10 @@ export async function GET(req: NextRequest) {
   const parsed = querySchema.safeParse({ query: searchParams.get("query") ?? undefined });
   const query = parsed.success ? parsed.data.query : undefined;
 
-  const where: {
-    clerk_user_id?: string;
-    OR?: Array<
-      | { plate: { contains: string; mode: "insensitive" } }
-      | { vin: { contains: string; mode: "insensitive" } }
-      | { unit_number: { contains: string; mode: "insensitive" } }
-      | { invoice_number: { contains: string; mode: "insensitive" } }
-    >;
-  } = ownerWhere(userId);
-  if (query?.trim()) {
-    const q = query.trim();
-    where.OR = [
-      { plate: { contains: q, mode: "insensitive" } },
-      { vin: { contains: q, mode: "insensitive" } },
-      { unit_number: { contains: q, mode: "insensitive" } },
-      { invoice_number: { contains: q, mode: "insensitive" } },
-    ];
-  }
-
   const cases = await prisma.case.findMany({
-    where,
+    where: caseListWhere(ownerWhere(userId), query),
     orderBy: { created_at: "desc" },
-    select: {
-      id: true,
-      invoice_number: true,
-      plate: true,
-      vin: true,
-      unit_number: true,
-      status: true,
-      grand_total_cents: true,
-      created_at: true,
-    },
+    select: caseListSelect,
   });
 
   return Response.json({ cases });

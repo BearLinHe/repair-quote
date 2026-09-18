@@ -5,7 +5,7 @@ import Link from "next/link";
 import { type ColumnDef, flexRender, getCoreRowModel, getPaginationRowModel, useReactTable } from "@tanstack/react-table";
 import { formatCents } from "@/lib/utils";
 import { Button, buttonVariants } from "@/components/ui/button";
-import { ChevronLeft, ChevronRight, CircleDollarSign, ClipboardCheck, Clock3, Download, Eye, Files, Inbox, RefreshCw, Search } from "lucide-react";
+import { ChevronDown, ChevronLeft, ChevronRight, CircleDollarSign, ClipboardCheck, Clock3, Download, Eye, Files, Inbox, RefreshCw, Search } from "lucide-react";
 
 type CaseRow = {
   id: string;
@@ -16,6 +16,7 @@ type CaseRow = {
   status: string;
   grand_total_cents: number;
   created_at: string;
+  repair_items: Array<{ id: string; name: string }>;
 };
 
 const statusLabel = (status: string) =>
@@ -101,7 +102,8 @@ export function CaseList() {
         <Search className="pointer-events-none absolute left-3.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
         <input
           type="search"
-          placeholder="搜索 Invoice Number / 车牌 / 车架号 / 车号"
+          placeholder="搜索维修项目 / Invoice / 车牌 / 车架号 / 车号"
+          aria-label="搜索维修单：维修项目、Invoice、车牌、车架号或车号"
           className="min-h-12 w-full rounded-xl border border-input bg-background/70 py-2.5 pl-10 pr-4 text-sm shadow-sm outline-none transition-all placeholder:text-muted-foreground focus:border-primary/40 focus:ring-2 focus:ring-ring/20"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
@@ -137,8 +139,8 @@ export function CaseList() {
       ) : cases.length === 0 ? (
         <div className="rounded-2xl border border-dashed border-border bg-card/70 p-10 text-center text-muted-foreground sm:p-14">
           <Inbox className="mx-auto mb-3 size-9 text-muted-foreground/70" />
-          <p className="font-medium text-foreground">暂无维修单</p>
-          <p className="mt-1 text-sm">新建维修单后会显示在这里。</p>
+          <p className="font-medium text-foreground">{query.trim() ? "没有找到匹配的维修单" : "暂无维修单"}</p>
+          {query.trim() ? <button className="mt-2 text-sm font-medium text-primary hover:underline" onClick={() => setQuery("")}>清空搜索</button> : <p className="mt-1 text-sm">新建维修单后会显示在这里。</p>}
         </div>
       ) : visibleCases.length === 0 ? (
         <div className="surface-panel p-10 text-center text-muted-foreground">
@@ -165,6 +167,10 @@ export function CaseList() {
                   <span className="w-full font-mono text-xs text-muted-foreground">Invoice #{c.invoice_number}</span>
                   <span className="font-medium text-foreground">{formatCents(c.grand_total_cents)}</span>
                   <span>{new Date(c.created_at).toLocaleDateString("zh-CN")}</span>
+                </div>
+                <div className="min-w-0 rounded-lg bg-muted/30 p-3">
+                  <p className="mb-1.5 text-xs text-muted-foreground">维修项目</p>
+                  <RepairItemSummary items={c.repair_items} />
                 </div>
                 <div className="grid grid-cols-2 gap-2 border-t pt-3">
                   <Link href={`/cases/${c.id}`} className={buttonVariants({ variant: "outline", className: c.status === "COMPLETED" ? "" : "col-span-2" })}>
@@ -198,7 +204,7 @@ function CaseDesktopTable({ cases }: { cases: CaseRow[] }) {
     {
       accessorKey: "vin",
       header: "车架号",
-      size: 220,
+      size: 180,
       cell: ({ row }) => <span className="block truncate font-mono text-xs text-muted-foreground" title={row.original.vin ?? undefined}>{row.original.vin ?? "-"}</span>,
     },
     {
@@ -210,20 +216,26 @@ function CaseDesktopTable({ cases }: { cases: CaseRow[] }) {
     {
       accessorKey: "status",
       header: "状态",
-      size: 110,
+      size: 90,
       cell: ({ row }) => <span className={`inline-flex whitespace-nowrap rounded-full px-2.5 py-1 text-xs font-medium ring-1 ring-inset ${statusClass(row.original.status)}`}>{statusLabel(row.original.status)}</span>,
     },
     {
       accessorKey: "grand_total_cents",
       header: "总价",
-      size: 130,
+      size: 120,
       cell: ({ row }) => <span className="text-base font-bold tabular-nums">{formatCents(row.original.grand_total_cents)}</span>,
     },
     {
       accessorKey: "created_at",
       header: "创建时间",
-      size: 120,
+      size: 110,
       cell: ({ row }) => <span className="whitespace-nowrap text-muted-foreground tabular-nums">{new Date(row.original.created_at).toLocaleDateString("zh-CN")}</span>,
+    },
+    {
+      accessorKey: "repair_items",
+      header: "维修项目",
+      size: 220,
+      cell: ({ row }) => <RepairItemSummary items={row.original.repair_items} />,
     },
     {
       id: "actions",
@@ -251,11 +263,24 @@ function CaseDesktopTable({ cases }: { cases: CaseRow[] }) {
       <div className="flex items-center gap-2 text-xs text-muted-foreground"><span>每页</span><select value={pageSize} onChange={(event) => table.setPageSize(Number(event.target.value))} className="h-8 rounded-lg border bg-background px-2 text-xs text-foreground outline-none focus:border-primary/40">{[20, 50, 100, 200].map((size) => <option key={size} value={size}>{size}</option>)}</select><span>条</span></div>
     </div>
     <div className="overflow-x-auto">
-      <table className="data-table w-full min-w-[992px] table-fixed text-sm">
+      <table className="data-table w-full min-w-[1132px] table-fixed text-sm">
         <thead>{table.getHeaderGroups().map((headerGroup) => <tr key={headerGroup.id} className="border-b text-left">{headerGroup.headers.map((header) => <th key={header.id} className={`h-11 px-3 text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground ${header.column.id === "grand_total_cents" || header.column.id === "actions" ? "text-right" : ""}`} style={{ width: header.getSize() }}>{header.isPlaceholder ? null : flexRender(header.column.columnDef.header, header.getContext())}</th>)}</tr>)}</thead>
-        <tbody>{table.getRowModel().rows.map((row) => <tr key={row.id} className="border-b transition-colors last:border-0 hover:bg-muted/30">{row.getVisibleCells().map((cell) => <td key={cell.id} className={`h-[68px] px-3 align-middle ${cell.column.id === "grand_total_cents" || cell.column.id === "actions" ? "text-right" : ""}`} style={{ width: cell.column.getSize() }}>{flexRender(cell.column.columnDef.cell, cell.getContext())}</td>)}</tr>)}</tbody>
+        <tbody>{table.getRowModel().rows.map((row) => <tr key={row.id} className="border-b transition-colors last:border-0 hover:bg-muted/30">{row.getVisibleCells().map((cell) => <td key={cell.id} className={`h-[68px] px-3 py-3 align-middle ${cell.column.id === "grand_total_cents" || cell.column.id === "actions" ? "text-right" : ""}`} style={{ width: cell.column.getSize() }}>{flexRender(cell.column.columnDef.cell, cell.getContext())}</td>)}</tr>)}</tbody>
       </table>
     </div>
     <div className="flex items-center justify-between gap-3 border-t px-4 py-3"><p className="text-sm text-muted-foreground">第 {start}–{end} 条，共 {cases.length} 条</p><div className="flex items-center gap-2"><Button variant="outline" size="sm" onClick={() => table.previousPage()} disabled={!table.getCanPreviousPage()}><ChevronLeft className="size-4" />上一页</Button><span className="min-w-16 text-center text-sm tabular-nums">{pageIndex + 1} / {table.getPageCount()}</span><Button variant="outline" size="sm" onClick={() => table.nextPage()} disabled={!table.getCanNextPage()}>下一页<ChevronRight className="size-4" /></Button></div></div>
+  </div>;
+}
+
+function RepairItemSummary({ items = [] }: { items?: CaseRow["repair_items"] }) {
+  const namedItems = items.filter((item) => item.name.trim());
+  if (!namedItems.length) return <span className="text-sm text-muted-foreground">未填写</span>;
+  const itemList = (list: CaseRow["repair_items"]) => <ul className="space-y-1 text-sm leading-5">{list.map((item) => <li key={item.id} className="break-words [overflow-wrap:anywhere]">{item.name}</li>)}</ul>;
+  return <div className="min-w-0">
+    {itemList(namedItems.slice(0, 2))}
+    {namedItems.length > 2 && <details className="group mt-1.5">
+      <summary className="flex w-fit cursor-pointer list-none items-center gap-1 rounded text-xs text-primary outline-none focus-visible:ring-2 focus-visible:ring-ring [&::-webkit-details-marker]:hidden"><ChevronDown className="size-3.5 transition-transform group-open:rotate-180" />其余 {namedItems.length - 2} 项</summary>
+      <div className="mt-1.5">{itemList(namedItems.slice(2))}</div>
+    </details>}
   </div>;
 }
