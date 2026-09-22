@@ -4,41 +4,36 @@ import { prisma } from "@/lib/db";
 import { canAccessOwner, isAdminScope, isWriteForbiddenScope, ownerWhere, requireAuth, requireWriteAuth, unauthorizedResponse, writeForbiddenResponse } from "@/lib/auth";
 import { apiError } from "@/lib/api-error";
 import { auditData, getAuditActor } from "@/lib/audit";
+import { financeInvoiceWhere, parseFinanceFilters, paymentMethodOptions } from "@/lib/finance-query";
+import { invoicePartUsage } from "@/lib/invoice-parts";
 
 export async function GET(req: NextRequest) {
   const userId = await requireAuth();
   if (!userId) return unauthorizedResponse();
 
   const params = new URL(req.url).searchParams;
-  const start = params.get("start") ? new Date(`${params.get("start")}T00:00:00.000`) : undefined;
-  const end = params.get("end") ? new Date(`${params.get("end")}T23:59:59.999`) : undefined;
-  const billTo = params.get("bill_to")?.trim();
-  const requestedOwner = params.get("account")?.trim();
+  const parsed = parseFinanceFilters(params);
+  if (!parsed.success) return apiError("VALIDATION_ERROR", parsed.error.issues[0]?.message ?? "筛选条件不正确", 400);
+  const requestedOwner = parsed.data.account;
   const page = Math.max(1, Number.parseInt(params.get("page") ?? "1", 10) || 1);
   const pageSize = Math.min(200, Math.max(10, Number.parseInt(params.get("page_size") ?? "20", 10) || 20));
   const admin = isAdminScope(userId);
   const scope = admin && requestedOwner ? { clerk_user_id: requestedOwner } : ownerWhere(userId);
-  const where = {
-    ...scope,
-    ...(start || end ? { issued_at: { ...(start ? { gte: start } : {}), ...(end ? { lte: end } : {}) } } : {}),
-    ...(billTo ? { case: { bill_to_company: { contains: billTo, mode: "insensitive" as const } } } : {}),
-  };
-  const [invoices, total, accounts, billToCases] = await Promise.all([
+  const where = financeInvoiceWhere(scope, parsed.data);
+  const [invoices, total, accounts, billToCases, methods] = await Promise.all([
     prisma.invoiceRecord.findMany({
       where,
-      include: { case: { select: { plate: true, vin: true, unit_number: true, customer_name: true, bill_to_company: true } } },
+      include: { case: { select: { plate: true, vin: true, unit_number: true, customer_name: true, bill_to_company: true, payment_method: true, parts: { select: { name: true, qty: true }, orderBy: { created_at: "asc" } } } } },
       orderBy: [{ issued_at: "desc" }, { created_at: "desc" }],
       skip: (page - 1) * pageSize,
       take: pageSize,
     }),
     prisma.invoiceRecord.count({ where }),
-    admin
-      ? prisma.appUser.findMany({
-        where: { data_owner_id: { not: null } },
+    prisma.appUser.findMany({
+        where: admin ? { data_owner_id: { not: null } } : { data_owner_id: userId },
         orderBy: { name: "asc" },
         select: { name: true, login: true, data_owner_id: true },
-      })
-      : Promise.resolve([]),
+      }),
     prisma.case.findMany({
       where: {
         ...scope,
@@ -48,11 +43,14 @@ export async function GET(req: NextRequest) {
       distinct: ["bill_to_company"],
       orderBy: { bill_to_company: "asc" },
     }),
+    prisma.case.findMany({ where: { ...scope, invoice: { isNot: null } }, select: { payment_method: true }, distinct: ["payment_method"], orderBy: { payment_method: "asc" } }),
   ]);
   const accountMap = new Map(accounts.map((account) => [account.data_owner_id, account.name]));
   return Response.json({
     invoices: invoices.map((invoice) => ({
       ...invoice,
+      part_usage: invoicePartUsage(invoice.snapshot, invoice.case.parts),
+      payment_method: invoice.case.payment_method?.trim() || null,
       owner_name: invoice.clerk_user_id === "__ADMIN__"
         ? "Administrator"
         : accountMap.get(invoice.clerk_user_id) ?? invoice.clerk_user_id,
@@ -64,6 +62,7 @@ export async function GET(req: NextRequest) {
       total_pages: Math.max(1, Math.ceil(total / pageSize)),
     },
     can_filter_accounts: admin,
+    payment_method_options: paymentMethodOptions(methods.map((item) => item.payment_method)),
     bill_to_options: billToCases
       .map((item) => item.bill_to_company?.trim())
       .filter((value): value is string => Boolean(value)),

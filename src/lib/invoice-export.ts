@@ -1,4 +1,6 @@
 import ExcelJS from "exceljs";
+import { invoicePartUsage, invoicePartUsageText } from "./invoice-parts";
+import { financeDateValue } from "./finance-dates";
 
 type SnapshotLine = {
   name?: unknown;
@@ -31,6 +33,7 @@ export type InvoiceExportRecord = {
     payment_method: string | null;
     plate: string | null;
     unit_number: string | null;
+    parts?: Array<{ name: string; qty: number }>;
   };
 };
 
@@ -94,16 +97,30 @@ export async function buildInvoiceExportWorkbook(invoices: InvoiceExportRecord[]
     { header: "Details", key: "details", width: 58 },
     { header: "Status", key: "status", width: 13 },
     { header: "Memo", key: "memo", width: 38 },
+    { header: "付款方式", key: "payment_method", width: 18 },
+    { header: "配件用量（名称 × 数量）", key: "part_usage", width: 40 },
+  ];
+
+  const partsSheet = workbook.addWorksheet("配件用量", { views: [{ state: "frozen", ySplit: 1 }] });
+  partsSheet.columns = [
+    { header: "开票日期", key: "date", width: 14 },
+    { header: "Invoice", key: "invoice", width: 24 },
+    { header: "Bill To", key: "bill_to", width: 28 },
+    { header: "配件名称", key: "part", width: 40 },
+    { header: "数量", key: "qty", width: 12 },
+    { header: "付款方式", key: "payment_method", width: 18 },
   ];
 
   for (const invoice of invoices) {
     const snapshot = snapshotOf(invoice.snapshot);
     const department = asText(snapshot.bill_to_company) ?? invoice.case.bill_to_company ?? "-";
     const number = asText(snapshot.unit_number) ?? invoice.case.unit_number ?? asText(snapshot.plate) ?? invoice.case.plate ?? "-";
-    const paymentMethod = asText(snapshot.payment_method) ?? invoice.case.payment_method;
+    const paymentMethod = invoice.case.payment_method?.trim() || null;
+    const parts = invoicePartUsage(invoice.snapshot, invoice.case.parts);
+    const date = new Date(`${financeDateValue(invoice.issued_at)}T00:00:00Z`);
     const details = invoiceDetails(invoice, snapshot);
     const row = sheet.addRow({
-      date: invoice.issued_at,
+      date,
       department,
       mode: "Truck",
       number,
@@ -111,12 +128,17 @@ export async function buildInvoiceExportWorkbook(invoices: InvoiceExportRecord[]
       details,
       status: paymentStatus(invoice.payment_status),
       memo: `Invoice #${invoice.invoice_number}${paymentMethod ? `\n付款方式：${paymentMethod}` : ""}`,
+      payment_method: paymentMethod ?? "未填写",
+      part_usage: invoicePartUsageText(parts) || "无配件",
     });
-    const detailLines = Math.max(1, details.split("\n").length);
+    const detailLines = Math.max(1, details.split("\n").length, parts.length);
     row.height = Math.min(132, Math.max(36, detailLines * 17));
     row.alignment = { horizontal: "center", vertical: "middle" };
     row.getCell("details").alignment = { horizontal: "left", vertical: "middle", wrapText: true };
     row.getCell("memo").alignment = { horizontal: "left", vertical: "middle", wrapText: true };
+    row.getCell("part_usage").alignment = { horizontal: "left", vertical: "middle", wrapText: true };
+    row.getCell("payment_method").alignment = { horizontal: "center", vertical: "middle", wrapText: true };
+    for (const part of parts) partsSheet.addRow({ date, invoice: invoice.invoice_number, bill_to: department, part: part.name, qty: part.qty ?? "未记录", payment_method: paymentMethod ?? "未填写" });
   }
 
   const header = sheet.getRow(1);
@@ -132,7 +154,16 @@ export async function buildInvoiceExportWorkbook(invoices: InvoiceExportRecord[]
   sheet.getColumn("amount").numFmt = '"$"#,##0.00';
   sheet.getColumn("amount").alignment = { horizontal: "center", vertical: "middle" };
   sheet.getColumn("status").alignment = { horizontal: "center", vertical: "middle" };
-  sheet.autoFilter = { from: "A1", to: "H1" };
+  sheet.autoFilter = { from: "A1", to: "J1" };
+
+  partsSheet.getColumn("date").numFmt = "m/d/yyyy";
+  partsSheet.autoFilter = { from: "A1", to: "F1" };
+  partsSheet.eachRow((row, index) => {
+    row.height = index === 1 ? 28 : 36;
+    row.alignment = { horizontal: "center", vertical: "middle", wrapText: true };
+    row.font = { name: "Arial", size: 10, ...(index === 1 ? { bold: true, color: { argb: "FFFFFFFF" } } : {}) };
+    if (index === 1) row.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF2F6B4F" } };
+  });
 
   for (let rowNumber = 2; rowNumber <= sheet.rowCount; rowNumber += 1) {
     const row = sheet.getRow(rowNumber);

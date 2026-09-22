@@ -1,36 +1,25 @@
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/db";
 import { isAdminScope, ownerWhere, requireAuth, unauthorizedResponse } from "@/lib/auth";
+import { apiError } from "@/lib/api-error";
+import { financeInvoiceWhere, parseFinanceFilters } from "@/lib/finance-query";
 
 export async function GET(req: NextRequest) {
   const userId = await requireAuth();
   if (!userId) return unauthorizedResponse();
 
   const params = new URL(req.url).searchParams;
-  const end = params.get("end") ? new Date(`${params.get("end")}T23:59:59.999`) : new Date();
-  const start = params.get("start")
-    ? new Date(`${params.get("start")}T00:00:00.000`)
-    : new Date(end.getFullYear(), end.getMonth(), 1);
-  const billTo = params.get("bill_to")?.trim();
-  const requestedOwner = params.get("account")?.trim();
+  const parsed = parseFinanceFilters(params);
+  if (!parsed.success) return apiError("VALIDATION_ERROR", parsed.error.issues[0]?.message ?? "筛选条件不正确", 400);
+  const { start, end, account: requestedOwner } = parsed.data;
   const scope = isAdminScope(userId) && requestedOwner
     ? { clerk_user_id: requestedOwner }
     : ownerWhere(userId);
-  const invoiceCaseFilter = billTo
-    ? { case: { bill_to_company: { contains: billTo, mode: "insensitive" as const } } }
-    : {};
-  const laborCaseFilter = billTo
-    ? { bill_to_company: { contains: billTo, mode: "insensitive" as const } }
-    : {};
+  const where = { ...financeInvoiceWhere(scope, parsed.data), payment_status: { not: "VOID" as const } };
 
   const [invoice, laborHours] = await Promise.all([
     prisma.invoiceRecord.aggregate({
-      where: {
-        ...scope,
-        ...invoiceCaseFilter,
-        issued_at: { gte: start, lte: end },
-        payment_status: { not: "VOID" },
-      },
+      where,
       _sum: {
         parts_revenue_cents: true,
         labor_revenue_cents: true,
@@ -41,16 +30,7 @@ export async function GET(req: NextRequest) {
       _count: true,
     }),
     prisma.caseLabor.aggregate({
-      where: {
-        case: {
-          ...scope,
-          ...laborCaseFilter,
-          invoice: {
-            issued_at: { gte: start, lte: end },
-            payment_status: { not: "VOID" },
-          },
-        },
-      },
+      where: { case: { invoice: { is: where } } },
       _sum: { hours: true },
     }),
   ]);
