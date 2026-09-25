@@ -196,6 +196,7 @@ model InventoryItem {
   purchase_lines PurchaseOrderLine[]
   case_parts     CasePart[]
   movements      StockMovement[]
+  supplier_mappings SupplierPartMapping[]
 
   @@unique([clerk_user_id, sku])
   @@index([clerk_user_id, name])
@@ -216,10 +217,48 @@ model PurchaseOrder {
   notes                 String?
   received_at           DateTime?
   received_by           String?
+  supplier_invoice_number String?
+  supplier_key            String?
+  supplier_invoice_key    String?
 
   lines PurchaseOrderLine[]
+  source_import PurchaseImport?
 
   @@index([clerk_user_id, purchase_date])
+  @@unique([clerk_user_id, supplier_key, supplier_invoice_key], map: "purchase_supplier_invoice_unique")
+}
+
+model PurchaseImport {
+  id                String   @id @default(uuid())
+  created_at        DateTime @default(now())
+  updated_at        DateTime @updatedAt
+  clerk_user_id     String
+  file_hash         String
+  file_name         String
+  image_data_url    String
+  status            String   @default("PROCESSING")
+  model             String
+  attempt_count     Int      @default(1)
+  attempted_at      DateTime @default(now())
+  extracted         Json?
+  reviewed          Json?
+  created_by        String
+  purchase_order_id String?  @unique
+  purchase_order    PurchaseOrder? @relation(fields: [purchase_order_id], references: [id], onDelete: Restrict)
+
+  @@unique([clerk_user_id, file_hash])
+  @@index([clerk_user_id, created_at])
+}
+
+model SupplierPartMapping {
+  id                String @id @default(uuid())
+  clerk_user_id     String
+  supplier_key      String
+  item_number_key   String
+  inventory_item_id String
+  inventory_item    InventoryItem @relation(fields: [inventory_item_id], references: [id], onDelete: Cascade)
+
+  @@unique([clerk_user_id, supplier_key, item_number_key], map: "supplier_part_mapping_unique")
 }
 
 model PurchaseOrderLine {

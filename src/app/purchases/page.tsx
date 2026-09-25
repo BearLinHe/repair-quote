@@ -1,8 +1,9 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { Eye, FileText, PackagePlus, Plus, Trash2, X } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { Eye, FileScan, FileText, PackagePlus, Plus, Trash2, X } from "lucide-react";
+import Link from "next/link";
+import { Button, buttonVariants } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { DatePicker } from "@/components/ui/date-picker";
 import { Input } from "@/components/ui/input";
@@ -21,6 +22,9 @@ type Order = {
   purchase_date: string;
   status: string;
   total_cents: number;
+  supplier_invoice_number?: string | null;
+  additional_cost_cents?: number;
+  source_import?: { id: string } | null;
   lines: Array<{ id: string; name_snapshot: string; qty: number; unit_cost_cents: number; inventory_item?: { unit: string } }>;
 };
 
@@ -68,6 +72,7 @@ export default function PurchasesPage() {
 
   useEffect(() => {
     load();
+    setSelectedOrderId(new URLSearchParams(window.location.search).get("order"));
   }, []);
 
   useEffect(() => {
@@ -187,6 +192,7 @@ export default function PurchasesPage() {
       <div className="page-hero">
         <p className="section-eyebrow">维修部采购</p>
         <h1 className="mt-2 text-3xl font-bold tracking-tight sm:text-4xl">采购入库</h1>
+        <Link className={buttonVariants({ className: "mt-4" })} href="/purchases/import"><FileScan className="mr-2 size-4" />拍照 / AI 识别入库</Link>
       </div>
       {error && <div className="rounded-xl border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive">{error}</div>}
 
@@ -329,6 +335,7 @@ export default function PurchasesPage() {
             <div className="relative h-[100dvh] max-h-none w-full max-w-4xl overflow-y-auto border border-border bg-card shadow-2xl sm:h-auto sm:max-h-[90vh] sm:rounded-3xl">
               <div className="flex items-start justify-between gap-4 border-b border-border p-5 sm:p-6"><div><div className="flex flex-wrap items-center gap-2.5"><h2 className="text-xl font-bold">{order.supplier}</h2><span className={`inline-flex items-center gap-2 text-sm font-medium ${order.status === "RECEIVED" ? "text-emerald-700 dark:text-emerald-300" : order.status === "CANCELED" ? "text-muted-foreground" : "text-amber-700 dark:text-amber-300"}`}><span className="size-1.5 rounded-full bg-current" />{status(order.status)}</span></div><p className="mt-1 font-mono text-sm text-muted-foreground">{order.purchase_number}</p></div><button type="button" className="flex size-10 shrink-0 items-center justify-center rounded-xl text-muted-foreground hover:bg-muted hover:text-foreground" onClick={() => setSelectedOrderId(null)} aria-label="关闭"><X className="size-4" /></button></div>
               <div className="grid grid-cols-2 gap-4 border-b border-border bg-muted/20 p-5 sm:grid-cols-3 sm:p-6"><div><p className="text-xs text-muted-foreground">采购日期</p><p className="mt-1 font-semibold">{new Date(order.purchase_date).toLocaleDateString("zh-CN")}</p></div><div><p className="text-xs text-muted-foreground">零件数量</p><p className="mt-1 font-semibold">{order.lines.length} 项</p></div><div className="col-span-2 sm:col-span-1 sm:text-right"><p className="text-xs text-muted-foreground">采购总额</p><p className="mt-1 text-2xl font-bold tabular-nums">{formatCents(order.total_cents)}</p></div></div>
+              {order.source_import && <div className="space-y-2 border-b p-5 text-sm"><p>供应商单号：{order.supplier_invoice_number}</p><p className="text-muted-foreground">附加费用（含税费、CORE 等）：{formatCents(order.additional_cost_cents ?? 0)}，不摊入零件平均成本。</p><Link className="inline-flex min-h-9 items-center text-primary underline" href={`/purchases/import?id=${order.source_import.id}`}>查看单据副本、识别结果与费用明细</Link></div>}
               <div className="p-5 sm:p-6"><div className="overflow-hidden rounded-xl border border-border"><div className="hidden grid-cols-[minmax(0,1fr)_100px_170px_160px] gap-4 border-b bg-muted/40 px-4 py-3 text-xs font-semibold text-muted-foreground sm:grid"><span>零件名称</span><span className="text-right">数量</span><span className="text-right">单位成本</span><span className="text-right">小计</span></div><div className="divide-y divide-border/60">{order.lines.map((line) => <div key={line.id} className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 px-4 py-3 text-sm sm:grid-cols-[minmax(0,1fr)_100px_170px_160px] sm:gap-4"><p className="font-medium">{line.name_snapshot}</p><p className="text-right tabular-nums">{line.qty}</p><p className="hidden text-right tabular-nums text-muted-foreground sm:block">{formatCents(line.unit_cost_cents)} / {line.inventory_item?.unit ?? "单位"}</p><p className="hidden text-right font-semibold tabular-nums sm:block">{formatCents(line.qty * line.unit_cost_cents)}</p></div>)}</div></div></div>
             </div>
           </div>

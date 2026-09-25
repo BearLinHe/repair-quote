@@ -23,7 +23,7 @@ export async function GET() {
   if (!userId) return unauthorizedResponse();
   const orders = await prisma.purchaseOrder.findMany({
     where: ownerWhere(userId),
-    include: { lines: { include: { inventory_item: { select: { sku: true, name: true, unit: true } } } } },
+    include: { source_import: { select: { id: true } }, lines: { include: { inventory_item: { select: { sku: true, name: true, unit: true } } } } },
     orderBy: [
       { created_at: "desc" },
       { id: "desc" },

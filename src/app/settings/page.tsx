@@ -109,6 +109,7 @@ export default function SettingsPage() {
 
   const actionLabel = (action: string) => ({
     PURCHASE_CREATED: "创建采购单",
+    PURCHASE_INVOICE_EXTRACTED: "AI 识别采购单据",
     PURCHASE_RECEIVED: "确认采购入库",
     PURCHASE_CANCELED: "取消采购单",
     INVENTORY_OTHER_INBOUND: "其他入库",
