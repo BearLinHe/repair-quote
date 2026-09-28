@@ -2,10 +2,22 @@
 
 import { IMPORT_IMAGE_LIMIT } from "./purchase-import";
 
+function validatePurchasePhoto(file: File) {
+  if (!file.type.startsWith("image/")) throw new Error("请上传图片文件，不支持文件夹或其他文件；PDF 请先转为 JPG、PNG 或 WebP");
+  if (file.size > 40 * 1024 * 1024) throw new Error("照片原图不能超过 40 MB");
+  if (!file.size) throw new Error("图片文件为空，请重新选择或拍照");
+}
+
+export function getPurchasePhotoSelection(files: ArrayLike<File>): File {
+  if (files.length !== 1) throw new Error("每次只能上传一张单据图片，请逐张识别");
+  const file = files[0];
+  validatePurchasePhoto(file);
+  return file;
+}
+
 // Preserve substantially more text detail than small SKU thumbnails.
 export async function preparePurchasePhoto(file: File): Promise<string> {
-  if (!file.type.startsWith("image/")) throw new Error("第一版支持单页图片，请选择 JPG、PNG 或 WebP；PDF 请先转为图片");
-  if (file.size > 40 * 1024 * 1024) throw new Error("照片原图不能超过 40 MB");
+  validatePurchasePhoto(file);
   const url = URL.createObjectURL(file);
   try {
     const image = await new Promise<HTMLImageElement>((resolve, reject) => {

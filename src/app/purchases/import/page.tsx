@@ -1,8 +1,9 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useRef, useState } from "react";
-import { ArrowLeft, Camera, CheckCircle2, FileScan, Loader2, Plus, RefreshCw, Trash2, Upload } from "lucide-react";
+import { useEffect, useState } from "react";
+import { ArrowLeft, CheckCircle2, FileScan, Loader2, Plus, RefreshCw, Trash2 } from "lucide-react";
+import { PurchasePhotoUpload } from "@/components/purchase-photo-upload";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { apiErrorMessage } from "@/lib/api-error";
@@ -53,8 +54,6 @@ export default function PurchaseImportPage() {
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
   const [saved, setSaved] = useState<{ id: string; purchase_number?: string } | null>(null);
-  const fileRef = useRef<HTMLInputElement>(null);
-  const cameraRef = useRef<HTMLInputElement>(null);
 
   async function loadOptions() {
     const result = await api<Options>("/api/purchases/imports");
@@ -98,7 +97,7 @@ export default function PurchaseImportPage() {
   }, [draft, saved]);
 
   async function choosePhoto(file?: File) {
-    if (!file) return;
+    if (!file || busy || !options?.canWrite) return;
     setBusy("处理照片…"); setError("");
     try { setImage(await preparePurchasePhoto(file)); setFileName(file.name.slice(0, 200)); setSource(null); setDraft(null); setSaved(null); }
     catch (e) { setError(e instanceof Error ? e.message : "图片处理失败"); }
@@ -147,12 +146,7 @@ export default function PurchaseImportPage() {
       <section className="surface-panel space-y-4 p-5 sm:p-6">
         <h2 className="text-lg font-bold">上传供应商单据</h2>
         <label className="block space-y-2 text-sm"><span>库存所属账号 *</span><select className={selectClass} value={owner} disabled={Boolean(busy)} onChange={(e) => { setOwner(e.target.value); setSource(null); }}><option value="">请选择入库账号</option>{options?.owners.map((candidate) => <option key={candidate.id} value={candidate.id}>{candidate.name}</option>)}</select></label>
-        <div className="rounded-2xl border border-dashed border-primary/30 bg-primary/5 p-6 text-center">
-          <FileScan className="mx-auto size-9 text-primary" /><p className="mt-3 font-semibold">拍清整张单据，尤其是零件编号、数量和金额</p><p className="mt-2 text-xs text-muted-foreground">单页 JPG / PNG / WebP，原图最大 40 MB；上传前自动压缩并保留单据副本。</p>
-          <input className="hidden" ref={fileRef} type="file" accept="image/*" onChange={(e) => { void choosePhoto(e.target.files?.[0]); e.target.value = ""; }} />
-          <input className="hidden" ref={cameraRef} type="file" accept="image/*" capture="environment" onChange={(e) => { void choosePhoto(e.target.files?.[0]); e.target.value = ""; }} />
-          <div className="mt-4 flex flex-wrap justify-center gap-3"><Button variant="outline" disabled={Boolean(busy) || !options?.canWrite} onClick={() => cameraRef.current?.click()}><Camera className="mr-2 size-4" />手机拍照</Button><Button variant="outline" disabled={Boolean(busy) || !options?.canWrite} onClick={() => fileRef.current?.click()}><Upload className="mr-2 size-4" />选择图片</Button></div>
-        </div>
+        <PurchasePhotoUpload disabled={Boolean(busy) || !options?.canWrite} onFile={(file) => void choosePhoto(file)} onError={setError} />
         {image && <div className="space-y-2"><p className="break-all text-xs text-muted-foreground">{fileName}</p><img src={image} alt="待识别的供应商单据" className="mx-auto max-h-[420px] rounded-xl border object-contain" /></div>}
         <p className="text-xs leading-relaxed text-muted-foreground">点击开始识别会将单据图片发送至 OpenAI。AI 可能读错，不会自动入库。请核对实收数量；欠货、退货、外币及多页单据暂请手工处理。</p>
         <Button className="w-full" disabled={!image || !owner || Boolean(busy) || !options?.configured || !options.canWrite} onClick={recognize}><FileScan className="mr-2 size-4" />开始识别</Button>
