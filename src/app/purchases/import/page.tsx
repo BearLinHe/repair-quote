@@ -9,7 +9,7 @@ import { Input } from "@/components/ui/input";
 import { apiErrorMessage } from "@/lib/api-error";
 import { formatCents } from "@/lib/utils";
 import { preparePurchasePhoto } from "@/lib/purchase-photo";
-import { moneyCents, reviewedInvoiceSchema, validateReviewedInvoice, type ExtractedInvoice, type ImportInventoryItem, type ReviewedInvoice } from "@/lib/purchase-import";
+import { defaultPurchaseSku, moneyCents, purchaseItemName, purchaseLineDefaults, purchaseLineNumberPatch, reviewedInvoiceSchema, validateReviewedInvoice, type ExtractedInvoice, type ImportInventoryItem, type ReviewedInvoice } from "@/lib/purchase-import";
 
 type History = { id: string; file_name: string; created_at: string; status: string; clerk_user_id: string; purchase_order_id: string | null };
 type Options = { configured: boolean; canWrite: boolean; owners: { id: string; name: string }[]; imports: History[] };
@@ -36,10 +36,16 @@ function SkuPicker({ line, items, onChange }: { line: DraftLine; items: ImportIn
       <option value="">新建 SKU（保存草稿时创建）</option>
       {matches.map((item) => <option key={item.id} value={item.id}>{item.sku} · {item.name}</option>)}
     </select>
-    {line.inventory_item_id ? <p className="text-xs text-primary">{line.match || "已选择已有库存零件"}，请核对型号。</p> : <div className="grid grid-cols-[1fr_100px] gap-2">
-      <Input aria-label="新 SKU 编号" placeholder="填写新 SKU，必填" maxLength={50} value={line.new_sku} onChange={(e) => onChange({ new_sku: e.target.value })} />
-      <Input aria-label="库存单位" placeholder="单位" value={line.unit} onChange={(e) => onChange({ unit: e.target.value })} />
-    </div>}
+    {line.inventory_item_id ? <p className="text-xs text-primary">{line.match || "已选择已有库存零件"}，请核对型号。已有库存名称不会自动覆盖。</p> : <>
+      <div className="grid grid-cols-[minmax(0,1fr)_100px] gap-2">
+        <label className="space-y-1 text-xs text-muted-foreground"><span>SKU（默认使用零件编号）</span><Input aria-label="新 SKU 编号" placeholder="默认使用完整零件编号" maxLength={50} value={line.new_sku} onChange={(e) => onChange({ new_sku: e.target.value })} /></label>
+        <label className="space-y-1 text-xs text-muted-foreground"><span>库存单位</span><Input aria-label="库存单位" placeholder="单位" value={line.unit} onChange={(e) => onChange({ unit: e.target.value })} /></label>
+      </div>
+      <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
+        <p>{line.item_number.trim().length > 50 ? "零件编号超过 50 字，未自动截断；请选择已有 SKU 或手动填写。" : "修正零件编号时，默认 SKU 会同步更新；也可以自定义。"}</p>
+        {defaultPurchaseSku(line.item_number) && line.new_sku !== defaultPurchaseSku(line.item_number) && <Button type="button" size="sm" variant="ghost" onClick={() => onChange({ new_sku: defaultPurchaseSku(line.item_number) })}>使用零件编号</Button>}
+      </div>
+    </>}
   </div>;
 }
 
@@ -73,9 +79,9 @@ export default function PurchaseImportPage() {
         supplier: extract.supplier ?? "", invoice_number: extract.invoice_number ?? "", invoice_date: extract.invoice_date ?? "", currency: extract.currency ?? "",
         subtotal: extract.subtotal ?? "", tax: extract.tax ?? "", shipping: extract.shipping ?? "", surcharge: extract.surcharge ?? "", total: extract.total ?? "", notes: "", confirmed: false,
         lines: extract.lines.map((line, index) => ({
-          item_number: line.item_number ?? "", description: line.description ?? "", qty: line.shipped_qty === null ? "" : String(line.shipped_qty),
+          ...purchaseLineDefaults(line), qty: line.shipped_qty === null ? "" : String(line.shipped_qty),
           unit_price: line.unit_price ?? "", line_amount: line.line_amount ?? "", kind: /(?:^|[-\s])CORE\b/i.test(line.item_number ?? "") ? "CORE" : line.kind,
-          inventory_item_id: result.suggestions[index]?.id ?? null, new_sku: (line.item_number ?? "").length <= 50 ? line.item_number ?? "" : "", unit: "个",
+          inventory_item_id: result.suggestions[index]?.id ?? null, unit: "个",
           warning: [line.warning, line.backordered_qty ? `B/O 欠货 ${line.backordered_qty}：本次不能入库` : ""].filter(Boolean).join("；"), match: result.suggestions[index]?.reason,
         })),
       });
@@ -165,11 +171,16 @@ export default function PurchaseImportPage() {
             {draft.lines.map((line, index) => <article key={index} className="surface-panel space-y-3 p-4">
               <div className="flex items-center gap-3"><span className="flex size-7 shrink-0 items-center justify-center rounded-lg bg-muted text-xs font-bold">{index + 1}</span><select aria-label={`第 ${index + 1} 行分类`} className={selectClass} value={line.kind} onChange={(e) => patchLine(index, { kind: e.target.value as DraftLine["kind"] })}><option value="UNKNOWN">待确认分类</option><option value="PART">零件 · 增加库存</option><option value="CORE">CORE / 押金 · 不入库存</option><option value="FEE">其他费用 · 不入库存</option></select><Button size="icon" variant="ghost" aria-label={`删除第 ${index + 1} 行`} onClick={() => patch({ lines: draft.lines.filter((_, i) => i !== index) })}><Trash2 className="size-4" /></Button></div>
               {line.warning && <p className="text-xs text-amber-700 dark:text-amber-300">{line.warning}</p>}
-              <div className="grid gap-3 sm:grid-cols-2"><label className="space-y-1 text-xs text-muted-foreground"><span>供应商完整编号</span><Input value={line.item_number} onChange={(e) => patchLine(index, { item_number: e.target.value, inventory_item_id: null, match: undefined })} /></label><label className="space-y-1 text-xs text-muted-foreground"><span>零件 / 费用名称 *</span><Input value={line.description} onChange={(e) => patchLine(index, { description: e.target.value })} /></label></div>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <label className="space-y-1 text-xs text-muted-foreground"><span>零件编号（默认 SKU）</span><Input value={line.item_number} onChange={(e) => patchLine(index, purchaseLineNumberPatch(line, e.target.value, items))} /></label>
+                <label className="space-y-1 text-xs text-muted-foreground"><span>零件 / 费用名称原文 *</span><Input value={line.description} onChange={(e) => patchLine(index, { description: e.target.value, description_zh: "" })} /></label>
+                <label className="space-y-1 text-xs text-muted-foreground sm:col-span-2"><span>中文译名（自动翻译，可修改）</span><Input placeholder="识别时自动翻译；历史记录或不确定的译名可手动补充" maxLength={200} value={line.description_zh ?? ""} onChange={(e) => patchLine(index, { description_zh: e.target.value })} /></label>
+              </div>
+              <p className="break-words text-xs leading-relaxed text-muted-foreground">{line.kind === "PART" ? "保存名称" : "名称预览"}：<span className="text-foreground">{purchaseItemName(line.description, line.description_zh) || "待填写"}</span>。中文仅供辅助核对；修改原文后需重新填写对应译名。</p>
               <div className="grid grid-cols-3 gap-2">{([['qty', '数量（核对实收）'], ['unit_price', '实际单价 $'], ['line_amount', '行金额 $']] as const).map(([key, label]) => <label key={key} className="space-y-1 text-xs text-muted-foreground"><span>{label}</span><Input inputMode={key === "qty" ? "numeric" : "decimal"} value={line[key]} onChange={(e) => patchLine(index, { [key]: e.target.value })} /></label>)}</div>
               {line.kind === "PART" && Number(line.qty) > 0 ? <SkuPicker line={line} items={items} onChange={(value) => patchLine(index, value)} /> : <p className="rounded-lg bg-muted/40 p-2 text-xs text-muted-foreground">此行不增加库存数量。</p>}
             </article>)}
-            <Button variant="outline" className="w-full" onClick={() => patch({ lines: [...draft.lines, { item_number: "", description: "", qty: "1", unit_price: "", line_amount: "", kind: "PART", inventory_item_id: null, new_sku: "", unit: "个" }] })}><Plus className="mr-2 size-4" />补充漏识别行</Button>
+            <Button variant="outline" className="w-full" onClick={() => patch({ lines: [...draft.lines, { item_number: "", description: "", description_zh: "", qty: "1", unit_price: "", line_amount: "", kind: "PART", inventory_item_id: null, new_sku: "", unit: "个" }] })}><Plus className="mr-2 size-4" />补充漏识别行</Button>
           </section>
           <section className="surface-panel space-y-4 p-4 sm:p-5"><h2 className="font-bold">金额复核</h2><div className="grid grid-cols-2 gap-3 sm:grid-cols-3">{([['subtotal', '单据小计（含 CORE）'], ['tax', '税费'], ['shipping', '运费'], ['surcharge', '其他附加费用'], ['total', '单据总额']] as const).map(([key, label]) => <label key={key} className="space-y-1 text-xs text-muted-foreground"><span>{label} $</span><Input inputMode="decimal" value={draft[key]} onChange={(e) => patch({ [key]: e.target.value })} /></label>)}</div><label className="block space-y-1 text-xs text-muted-foreground"><span>备注</span><Input value={draft.notes} onChange={(e) => patch({ notes: e.target.value })} /></label><p className="text-xs leading-relaxed text-muted-foreground">零件金额 {formatCents(partsAmount)}。CORE、税费、运费和其他费用会留档并计入采购总额，但不会摊入库存平均成本。单据有欠货、退货或实收差异时，请先与供应商核实，勿强行改金额使其相等。</p></section>
         </fieldset>

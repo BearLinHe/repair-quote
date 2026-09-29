@@ -1,6 +1,6 @@
 import type { Prisma } from "@prisma/client";
 import { auditData, type AuditActor } from "./audit";
-import { importKey, moneyCents, reviewedInvoiceSchema, validateReviewedInvoice, type ReviewedInvoice } from "./purchase-import";
+import { importKey, moneyCents, purchaseItemName, reviewedInvoiceSchema, validateReviewedInvoice, type ReviewedInvoice } from "./purchase-import";
 import { generatePurchaseNumber } from "./purchase-number";
 
 export class PurchaseImportError extends Error {}
@@ -25,6 +25,7 @@ export async function saveReviewedPurchase(tx: Prisma.TransactionClient, id: str
   const stockLines: Array<{ inventory_item_id: string; name_snapshot: string; qty: number; unit_cost_cents: number; line_total_cents: number }> = [];
   const confirmedMappings = new Map<string, string>();
   for (const line of input.lines.filter((item) => item.kind === "PART" && item.qty > 0)) {
+    const name = purchaseItemName(line.description, line.description_zh);
     let item;
     if (line.inventory_item_id) {
       item = await tx.inventoryItem.findFirst({ where: { id: line.inventory_item_id, clerk_user_id: owner, is_active: true } });
@@ -33,16 +34,17 @@ export async function saveReviewedPurchase(tx: Prisma.TransactionClient, id: str
       item = await tx.inventoryItem.findFirst({ where: { clerk_user_id: owner, sku: { equals: line.new_sku, mode: "insensitive" } } });
       if (item) {
         // Repeated new-SKU lines in this same document can reuse the newly created item only.
-        if (!stockLines.some((saved) => saved.inventory_item_id === item!.id) || item.name !== line.description || item.unit !== line.unit || !item.is_active) {
+        if (!stockLines.some((saved) => saved.inventory_item_id === item!.id) || item.name !== name || item.unit !== line.unit || !item.is_active) {
           throw new PurchaseImportError(`SKU ${line.new_sku} 已存在，请选择已有零件`);
         }
       } else {
-        item = await tx.inventoryItem.create({ data: { clerk_user_id: owner, sku: line.new_sku, name: line.description, unit: line.unit } });
+        item = await tx.inventoryItem.create({ data: { clerk_user_id: owner, sku: line.new_sku, name, unit: line.unit } });
         await tx.auditLog.create({ data: auditData(actor, { action: "INVENTORY_ITEM_CREATED", entityType: "INVENTORY_ITEM", entityId: item.id, entityLabel: item.name, details: { sku: item.sku, purchase_import_id: id } }) });
       }
     }
     const unitCost = moneyCents(line.unit_price)!;
-    stockLines.push({ inventory_item_id: item.id, name_snapshot: item.name, qty: line.qty, unit_cost_cents: unitCost, line_total_cents: line.qty * unitCost });
+    // The invoice's reviewed bilingual name is a snapshot, not a rename of an existing SKU.
+    stockLines.push({ inventory_item_id: item.id, name_snapshot: name, qty: line.qty, unit_cost_cents: unitCost, line_total_cents: line.qty * unitCost });
     if (line.item_number) {
       const partKey = importKey(line.item_number);
       if (confirmedMappings.has(partKey) && confirmedMappings.get(partKey) !== item.id) throw new PurchaseImportError("同一个供应商编号对应了不同 SKU，请核对");

@@ -3,22 +3,25 @@ import { z } from "zod";
 export const IMPORT_IMAGE_LIMIT = 3_200_000;
 export const importKey = (text: string) => text.normalize("NFKC").trim().replace(/\s+/g, " ").toUpperCase();
 
+const extractedLineSchema = z.object({
+  item_number: z.string().nullable(),
+  description: z.string().nullable(),
+  description_zh: z.string().nullable(),
+  shipped_qty: z.number().nullable(),
+  backordered_qty: z.number().nullable(),
+  unit_price: z.string().nullable(),
+  line_amount: z.string().nullable(),
+  kind: z.enum(["PART", "CORE", "FEE", "UNKNOWN"]),
+  warning: z.string().nullable(),
+});
+
 // Only shape is guaranteed by the model. Business validation happens independently below.
 export const extractedInvoiceSchema = z.object({
   supplier: z.string().nullable(),
   invoice_number: z.string().nullable(),
   invoice_date: z.string().nullable(),
   currency: z.string().nullable(),
-  lines: z.array(z.object({
-    item_number: z.string().nullable(),
-    description: z.string().nullable(),
-    shipped_qty: z.number().nullable(),
-    backordered_qty: z.number().nullable(),
-    unit_price: z.string().nullable(),
-    line_amount: z.string().nullable(),
-    kind: z.enum(["PART", "CORE", "FEE", "UNKNOWN"]),
-    warning: z.string().nullable(),
-  })),
+  lines: z.array(extractedLineSchema),
   subtotal: z.string().nullable(),
   tax: z.string().nullable(),
   shipping: z.string().nullable(),
@@ -27,6 +30,30 @@ export const extractedInvoiceSchema = z.object({
   warnings: z.array(z.string()),
 });
 export type ExtractedInvoice = z.infer<typeof extractedInvoiceSchema>;
+
+// Old stored results have no translation; keep them readable without weakening the AI schema.
+export const storedExtractedInvoiceSchema = extractedInvoiceSchema.extend({
+  lines: z.array(extractedLineSchema.extend({ description_zh: z.string().nullable().default(null) })),
+});
+
+export function defaultPurchaseSku(itemNumber: string | null | undefined) {
+  const number = itemNumber?.trim() ?? "";
+  // Never truncate a part identifier: a missing suffix could identify a different part.
+  return number.length <= 50 ? number : "";
+}
+
+export function purchaseItemName(description: string, translation?: string | null) {
+  const original = description.trim();
+  const chinese = translation?.trim() ?? "";
+  return !chinese || original.includes(chinese) ? original : `${original} / ${chinese}`;
+}
+
+export function purchaseLineDefaults(line: { item_number: string | null; description: string | null; description_zh?: string | null }) {
+  return {
+    item_number: line.item_number ?? "", description: line.description ?? "",
+    description_zh: line.description_zh ?? "", new_sku: defaultPurchaseSku(line.item_number),
+  };
+}
 
 export function moneyCents(value: string): number | null {
   if (!/^\d{1,8}(?:\.\d{1,2})?$/.test(value.trim())) return null;
@@ -48,6 +75,7 @@ export const reviewedInvoiceSchema = z.object({
   lines: z.array(z.object({
     item_number: z.string().trim().max(150),
     description: z.string().trim().min(1).max(200),
+    description_zh: z.string().trim().max(200).optional(),
     qty: z.number().int().min(0).max(100000),
     unit_price: money,
     line_amount: money,
@@ -71,6 +99,9 @@ export function validateReviewedInvoice(input: ReviewedInvoice): string[] {
     if (line.kind === "PART" && line.qty > 0 && !line.inventory_item_id && !line.new_sku) {
       errors.push(`第 ${index + 1} 行：请选择库存 SKU，或填写新 SKU`);
     }
+    if (line.kind === "PART" && line.qty > 0 && purchaseItemName(line.description, line.description_zh).length > 200) {
+      errors.push(`第 ${index + 1} 行：原文与中文合并后的名称超过 200 字，请精简后保存`);
+    }
     if (line.kind === "PART" && /(?:^|[-\s])CORE\b/i.test(line.item_number)) {
       errors.push(`第 ${index + 1} 行：CORE 编号应归类为 CORE 押金，不可作为零件入库`);
     }
@@ -84,8 +115,9 @@ export function validateReviewedInvoice(input: ReviewedInvoice): string[] {
   for (const line of input.lines.filter((line) => line.kind === "PART" && line.qty > 0 && !line.inventory_item_id)) {
     const key = importKey(line.new_sku);
     const previous = newSkus.get(key);
-    if (previous && previous !== `${line.description}|${line.unit}`) errors.push(`新 SKU ${line.new_sku} 对应了不同名称或单位，请核对`);
-    newSkus.set(key, `${line.description}|${line.unit}`);
+    const nameAndUnit = `${purchaseItemName(line.description, line.description_zh)}|${line.unit}`;
+    if (previous && previous !== nameAndUnit) errors.push(`新 SKU ${line.new_sku} 对应了不同名称或单位，请核对`);
+    newSkus.set(key, nameAndUnit);
   }
   return errors;
 }
@@ -97,4 +129,15 @@ export function suggestInventoryItem(itemNumber: string, items: ImportInventoryI
   const matches = items.filter((item) => importKey(item.sku) === importKey(itemNumber));
   // No prefix stripping, suffix stripping or fuzzy auto-linking of different parts.
   return itemNumber && matches.length === 1 ? { id: matches[0].id, reason: "SKU 完整匹配" } : null;
+}
+
+export function purchaseLineNumberPatch(line: { item_number: string; new_sku: string }, itemNumber: string, items: ImportInventoryItem[]) {
+  const followsNumber = !line.new_sku || line.new_sku === defaultPurchaseSku(line.item_number);
+  const match = followsNumber ? suggestInventoryItem(itemNumber, items) : null;
+  return {
+    item_number: itemNumber,
+    new_sku: followsNumber ? defaultPurchaseSku(itemNumber) : line.new_sku,
+    inventory_item_id: match?.id ?? null,
+    match: match?.reason,
+  };
 }

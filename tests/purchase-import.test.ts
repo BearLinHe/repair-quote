@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { importKey, moneyCents, reviewedInvoiceSchema, suggestInventoryItem, validateReviewedInvoice, type ReviewedInvoice } from "../src/lib/purchase-import";
+import { zodTextFormat } from "openai/helpers/zod";
+import { defaultPurchaseSku, extractedInvoiceSchema, importKey, moneyCents, purchaseItemName, purchaseLineDefaults, purchaseLineNumberPatch, reviewedInvoiceSchema, storedExtractedInvoiceSchema, suggestInventoryItem, validateReviewedInvoice, type ReviewedInvoice } from "../src/lib/purchase-import";
 import { validatedImageHash } from "../src/lib/purchase-import-server";
 
 export function sampleReview(): ReviewedInvoice {
@@ -68,4 +69,66 @@ test("duplicate detection hashes bytes; uploads reject fake or oversized images"
   assert.throws(() => validatedImageHash("data:image/jpeg;base64,AAAA"));
   assert.throws(() => validatedImageHash("https://example.com/photo.jpg"));
   assert.throws(() => validatedImageHash("data:image/jpeg;base64," + "A".repeat(3_200_000)));
+});
+
+test("full part number defaults to SKU and neither truncates nor loses CORE suffixes", () => {
+  assert.equal(defaultPurchaseSku(" 005F/DDE EA0101538128-CORE "), "005F/DDE EA0101538128-CORE");
+  assert.equal(defaultPurchaseSku(null), "");
+  assert.equal(defaultPurchaseSku("X".repeat(50)), "X".repeat(50));
+  assert.equal(defaultPurchaseSku("X".repeat(51)), "");
+  assert.deepEqual(purchaseLineDefaults({ item_number: "005F/DDE A1", description: "NOX SENSOR OUTLET", description_zh: "出口 NOX 传感器" }), {
+    item_number: "005F/DDE A1", description: "NOX SENSOR OUTLET", description_zh: "出口 NOX 传感器", new_sku: "005F/DDE A1",
+  });
+  assert.equal(purchaseLineDefaults({ item_number: "A1", description: "Sensor" }).description_zh, "");
+});
+
+test("editing a part number updates only the default SKU and exact inventory match", () => {
+  const items = [{ id: "existing", sku: "DDE A2", name: "Sensor", unit: "个" }];
+  const patch = purchaseLineNumberPatch({ item_number: "DDE A1", new_sku: "DDE A1" }, "DDE A2", items);
+  assert.equal(patch.new_sku, "DDE A2");
+  assert.equal(patch.inventory_item_id, "existing");
+  assert.equal(patch.match, "SKU 完整匹配");
+  const custom = purchaseLineNumberPatch({ item_number: "DDE A1", new_sku: "CUSTOM-SKU" }, "DDE A2", items);
+  assert.equal(custom.new_sku, "CUSTOM-SKU");
+  assert.equal(custom.inventory_item_id, null);
+  assert.equal(purchaseLineNumberPatch({ item_number: "", new_sku: "" }, "A1", items).new_sku, "A1");
+  assert.equal(purchaseLineNumberPatch({ item_number: "A1", new_sku: "A1" }, "X".repeat(51), items).new_sku, "");
+  assert.equal(purchaseLineNumberPatch({ item_number: "DDE A1", new_sku: "DDE A1" }, "A2", items).inventory_item_id, null);
+});
+
+test("AI requires a separate nullable translation, while old extraction records stay readable", () => {
+  const legacy = {
+    supplier: "Test", invoice_number: "A1", invoice_date: "2026-09-29", currency: "USD", subtotal: "10.00", tax: "0.00", shipping: "0.00", surcharge: "0.00", total: "10.00", warnings: [],
+    lines: [{ item_number: "DDE A1", description: "NOX SENSOR OUTLET", shipped_qty: 1, backordered_qty: 0, unit_price: "10.00", line_amount: "10.00", kind: "PART", warning: null }],
+  };
+  assert.equal(extractedInvoiceSchema.safeParse(legacy).success, false);
+  const stored = storedExtractedInvoiceSchema.parse(legacy);
+  assert.equal(stored.lines[0].description_zh, null);
+  assert.equal(stored.lines[0].description, "NOX SENSOR OUTLET");
+  const current = extractedInvoiceSchema.parse({ ...legacy, lines: [{ ...legacy.lines[0], description_zh: "出口 NOX 传感器" }] });
+  assert.equal(current.lines[0].description_zh, "出口 NOX 传感器");
+  assert.equal(current.lines[0].item_number, "DDE A1");
+  const schema = JSON.parse(JSON.stringify(zodTextFormat(extractedInvoiceSchema, "supplier_invoice"))).schema;
+  assert.ok(schema.properties.lines.items.required.includes("description_zh"));
+});
+
+test("bilingual names preserve the original, avoid duplicate Chinese, and remain editable", () => {
+  assert.equal(purchaseItemName(" NOX SENSOR OUTLET ", " 出口 NOX 传感器 "), "NOX SENSOR OUTLET / 出口 NOX 传感器");
+  assert.equal(purchaseItemName("传感器", "传感器"), "传感器");
+  assert.equal(purchaseItemName("Sensor / 传感器", "传感器"), "Sensor / 传感器");
+  assert.equal(purchaseItemName("Sensor", null), "Sensor");
+  const legacy = sampleReview();
+  assert.deepEqual(reviewedInvoiceSchema.parse(legacy), legacy);
+  const review = sampleReview(); review.lines[0].description_zh = "出口 NOX 传感器";
+  assert.equal(reviewedInvoiceSchema.parse(review).lines[0].description_zh, "出口 NOX 传感器");
+  assert.deepEqual(validateReviewedInvoice(review), []);
+  review.lines[0].description = "X".repeat(199);
+  assert.match(validateReviewedInvoice(review).join(), /名称超过 200 字/);
+});
+
+test("conflicting Chinese names on one new SKU require review", () => {
+  const review = sampleReview();
+  review.lines[0].description_zh = "出口传感器";
+  review.lines.push({ ...review.lines[0], description_zh: "入口传感器" });
+  assert.match(validateReviewedInvoice(review).join(), /对应了不同名称或单位/);
 });

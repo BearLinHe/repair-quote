@@ -13,7 +13,7 @@ test("AI purchase review is atomic, idempotent, account-scoped and never directl
   const review: ReviewedInvoice = {
     supplier: "Test Supplier", invoice_number: "test-invoice", invoice_date: "2026-09-24", currency: "USD", subtotal: "30.00", tax: "3.00", shipping: "2.00", surcharge: "0.00", total: "35.00", notes: "", confirmed: true,
     lines: [
-      { item_number: "DDE A1", description: "Sensor", qty: 2, unit_price: "10.00", line_amount: "20.00", kind: "PART", inventory_item_id: null, new_sku: "DDE A1", unit: "个" },
+      { item_number: "DDE A1", description: "Sensor", description_zh: "传感器", qty: 2, unit_price: "10.00", line_amount: "20.00", kind: "PART", inventory_item_id: null, new_sku: "DDE A1", unit: "个" },
       { item_number: "DDE A1-CORE", description: "Core", qty: 2, unit_price: "5.00", line_amount: "10.00", kind: "CORE", inventory_item_id: null, new_sku: "", unit: "个" },
     ],
   };
@@ -30,6 +30,8 @@ test("AI purchase review is atomic, idempotent, account-scoped and never directl
       assert.equal(order.total_cents, 3500);
       const items = await tx.inventoryItem.findMany({ where: { clerk_user_id: owner } });
       assert.equal(items.length, 1); // no CORE stock item
+      assert.equal(items[0].sku, "DDE A1");
+      assert.equal(items[0].name, "Sensor / 传感器");
       assert.equal(items[0].on_hand_qty, 0);
       assert.equal(items[0].avg_cost_cents, 0);
       assert.equal(await tx.stockMovement.count({ where: { clerk_user_id: owner } }), 0);
@@ -37,6 +39,7 @@ test("AI purchase review is atomic, idempotent, account-scoped and never directl
       assert.equal(lines.length, 1);
       assert.equal(lines[0].qty, 2);
       assert.equal(lines[0].unit_cost_cents, 1000); // ancillary costs not capitalized
+      assert.equal(lines[0].name_snapshot, "Sensor / 传感器");
       assert.equal(await tx.supplierPartMapping.count({ where: { clerk_user_id: owner } }), 1);
       const saved = await tx.purchaseImport.findUniqueOrThrow({ where: { id: source.id } });
       assert.equal(saved.status, "SAVED");
@@ -46,6 +49,12 @@ test("AI purchase review is atomic, idempotent, account-scoped and never directl
       const second = await tx.purchaseImport.create({ data: { clerk_user_id: owner, file_hash: "second-file", file_name: "test2.jpg", image_data_url: "test-only", model: "test", created_by: owner, status: "READY" } });
       await assert.rejects(saveReviewedPurchase(tx, second.id, owner, actor, { ...review, supplier: "test supplier", invoice_number: " TEST-INVOICE " }), /已经建单/);
       assert.equal(await tx.auditLog.count({ where: { actor_user_id: owner } }), 2);
+      const existing = await tx.inventoryItem.create({ data: { clerk_user_id: owner, sku: "A2", name: "Existing catalog name", unit: "个" } });
+      const reuse = { ...review, invoice_number: "second-invoice", lines: [{ ...review.lines[0], inventory_item_id: existing.id }, review.lines[1]] };
+      const reusedOrder = await saveReviewedPurchase(tx, second.id, owner, actor, reuse);
+      assert.equal((await tx.inventoryItem.findUniqueOrThrow({ where: { id: existing.id } })).name, "Existing catalog name");
+      assert.equal((await tx.purchaseOrderLine.findFirstOrThrow({ where: { purchase_order_id: reusedOrder.id } })).name_snapshot, "Sensor / 传感器");
+      assert.equal(await tx.stockMovement.count({ where: { clerk_user_id: owner } }), 0);
       throw rollback;
     }, { timeout: 60000 }), (error) => error === rollback);
     assert.equal(await db.purchaseImport.count({ where: { clerk_user_id: owner } }), 0);
