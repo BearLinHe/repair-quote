@@ -48,6 +48,19 @@ export function purchaseItemName(description: string, translation?: string | nul
   return !chinese || original.includes(chinese) ? original : `${original} / ${chinese}`;
 }
 
+const chineseText = new RegExp("\\p{Script=Han}", "u");
+
+// Only enrich an untranslated, matching catalog name. Never replace a curated name.
+export function existingPurchaseItemName(currentName: string, description: string, translation?: string | null) {
+  const chinese = translation?.trim() ?? "";
+  if (chineseText.test(currentName)) return { name: currentName, reason: "has_chinese" as const };
+  if (!chineseText.test(chinese)) return { name: currentName, reason: "missing_translation" as const };
+  if (importKey(currentName) !== importKey(description)) return { name: currentName, reason: "different_name" as const };
+  const name = purchaseItemName(currentName, chinese);
+  if (name.length > 200) return { name: currentName, reason: "too_long" as const };
+  return { name, reason: "append" as const };
+}
+
 export function purchaseLineDefaults(line: { item_number: string | null; description: string | null; description_zh?: string | null }) {
   return {
     item_number: line.item_number ?? "", description: line.description ?? "",
@@ -118,6 +131,15 @@ export function validateReviewedInvoice(input: ReviewedInvoice): string[] {
     const nameAndUnit = `${purchaseItemName(line.description, line.description_zh)}|${line.unit}`;
     if (previous && previous !== nameAndUnit) errors.push(`新 SKU ${line.new_sku} 对应了不同名称或单位，请核对`);
     newSkus.set(key, nameAndUnit);
+  }
+  const existingTranslations = new Map<string, string>();
+  for (const line of input.lines.filter((line) => line.kind === "PART" && line.qty > 0 && line.inventory_item_id)) {
+    const translation = line.description_zh?.trim();
+    if (!translation) continue;
+    const key = line.inventory_item_id!;
+    const previous = existingTranslations.get(key);
+    if (previous && previous !== importKey(translation)) errors.push("同一个已有 SKU 对应了不同中文译名，请核对后统一");
+    existingTranslations.set(key, importKey(translation));
   }
   return errors;
 }

@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { zodTextFormat } from "openai/helpers/zod";
-import { defaultPurchaseSku, extractedInvoiceSchema, importKey, moneyCents, purchaseItemName, purchaseLineDefaults, purchaseLineNumberPatch, reviewedInvoiceSchema, storedExtractedInvoiceSchema, suggestInventoryItem, validateReviewedInvoice, type ReviewedInvoice } from "../src/lib/purchase-import";
+import { defaultPurchaseSku, existingPurchaseItemName, extractedInvoiceSchema, importKey, moneyCents, purchaseItemName, purchaseLineDefaults, purchaseLineNumberPatch, reviewedInvoiceSchema, storedExtractedInvoiceSchema, suggestInventoryItem, validateReviewedInvoice, type ReviewedInvoice } from "../src/lib/purchase-import";
 import { validatedImageHash } from "../src/lib/purchase-import-server";
 
 export function sampleReview(): ReviewedInvoice {
@@ -131,4 +131,43 @@ test("conflicting Chinese names on one new SKU require review", () => {
   review.lines[0].description_zh = "出口传感器";
   review.lines.push({ ...review.lines[0], description_zh: "入口传感器" });
   assert.match(validateReviewedInvoice(review).join(), /对应了不同名称或单位/);
+});
+
+test("existing matching English names gain reviewed Chinese without replacing the original", () => {
+  assert.deepEqual(existingPurchaseItemName("NOX SENSOR OUTLET", "nox sensor outlet", " 出口 NOX 传感器 "), {
+    name: "NOX SENSOR OUTLET / 出口 NOX 传感器", reason: "append",
+  });
+  assert.equal(existingPurchaseItemName("Exh  Clamp", "ＥＸＨ CLAMP", "排气卡箍").name, "Exh  Clamp / 排气卡箍");
+});
+
+test("existing translated or custom catalog names are preserved", () => {
+  for (const name of ["NOX SENSOR OUTLET / 出口传感器", "已人工校正的名称", "Sensor（繁體譯名）"]) {
+    assert.deepEqual(existingPurchaseItemName(name, "NOX SENSOR OUTLET", "新译名"), { name, reason: "has_chinese" });
+  }
+  assert.deepEqual(existingPurchaseItemName("NOX SENSOR INLET", "NOX SENSOR OUTLET", "出口传感器"), {
+    name: "NOX SENSOR INLET", reason: "different_name",
+  });
+  for (const translation of [undefined, null, "", "   ", "Sensor"]) {
+    assert.deepEqual(existingPurchaseItemName("SENSOR", "SENSOR", translation), { name: "SENSOR", reason: "missing_translation" });
+  }
+});
+
+test("existing name enrichment is idempotent and never truncates long names", () => {
+  const first = existingPurchaseItemName("SENSOR", "SENSOR", "传感器");
+  assert.deepEqual(existingPurchaseItemName(first.name, "SENSOR", "传感器"), { name: first.name, reason: "has_chinese" });
+  const long = "S".repeat(195);
+  assert.deepEqual(existingPurchaseItemName(long, long, "传感器"), { name: long, reason: "too_long" });
+  assert.equal(existingPurchaseItemName("S".repeat(194), "S".repeat(194), "传感器").name.length, 200);
+});
+
+test("different translations of one existing SKU cannot silently overwrite each other", () => {
+  const review = sampleReview();
+  const id = "de537577-51af-4b4d-bd72-8d0044130249";
+  const line = { ...review.lines[0], inventory_item_id: id, description_zh: "出口传感器" };
+  review.lines = [line, { ...line, description_zh: "入口传感器" }];
+  assert.ok(validateReviewedInvoice(review).some((issue) => issue.includes("不同中文译名")));
+  review.lines[1].description_zh = " 出口传感器 ";
+  assert.ok(!validateReviewedInvoice(review).some((issue) => issue.includes("不同中文译名")));
+  review.lines[1].description_zh = "";
+  assert.ok(!validateReviewedInvoice(review).some((issue) => issue.includes("不同中文译名")));
 });

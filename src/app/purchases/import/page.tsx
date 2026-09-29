@@ -9,7 +9,7 @@ import { Input } from "@/components/ui/input";
 import { apiErrorMessage } from "@/lib/api-error";
 import { formatCents } from "@/lib/utils";
 import { preparePurchasePhoto } from "@/lib/purchase-photo";
-import { defaultPurchaseSku, moneyCents, purchaseItemName, purchaseLineDefaults, purchaseLineNumberPatch, reviewedInvoiceSchema, validateReviewedInvoice, type ExtractedInvoice, type ImportInventoryItem, type ReviewedInvoice } from "@/lib/purchase-import";
+import { defaultPurchaseSku, existingPurchaseItemName, moneyCents, purchaseItemName, purchaseLineDefaults, purchaseLineNumberPatch, reviewedInvoiceSchema, validateReviewedInvoice, type ExtractedInvoice, type ImportInventoryItem, type ReviewedInvoice } from "@/lib/purchase-import";
 
 type History = { id: string; file_name: string; created_at: string; status: string; clerk_user_id: string; purchase_order_id: string | null };
 type Options = { configured: boolean; canWrite: boolean; owners: { id: string; name: string }[]; imports: History[] };
@@ -25,10 +25,19 @@ async function api<T>(url: string, init?: RequestInit): Promise<T> {
   return data as T;
 }
 
-function SkuPicker({ line, items, onChange }: { line: DraftLine; items: ImportInventoryItem[]; onChange: (patch: Partial<DraftLine>) => void }) {
+function SkuPicker({ line, items, saved, onChange }: { line: DraftLine; items: ImportInventoryItem[]; saved: boolean; onChange: (patch: Partial<DraftLine>) => void }) {
   const [query, setQuery] = useState("");
   const term = query.trim().toLocaleLowerCase();
   const matches = items.filter((item) => item.id === line.inventory_item_id || `${item.sku} ${item.name}`.toLocaleLowerCase().includes(term));
+  const selected = items.find((item) => item.id === line.inventory_item_id);
+  const enriched = selected ? existingPurchaseItemName(selected.name, line.description, line.description_zh) : null;
+  const nameHint = enriched ? {
+    append: "保存草稿时会在原英文后补上中文，不改变 SKU、数量或成本。",
+    has_chinese: "已有中文名称，保留当前库存名称，不重复追加或覆盖。",
+    missing_translation: "填写并核对中文译名后，可为同名的英文库存零件补充中文。",
+    different_name: "库存名称与单据原文不同，保留当前名称；如需改名，请到库存管理维护。",
+    too_long: "追加中文后超过 200 字，保留当前名称；请精简译名或到库存管理维护。",
+  }[enriched.reason] : "所选零件已不可用，请重新选择。";
   return <div className="space-y-2 rounded-xl bg-primary/5 p-3">
     <p className="text-xs font-semibold">对应库存 SKU <span className="font-normal text-muted-foreground">· 仅匹配当前所属账号</span></p>
     <Input aria-label="搜索库存 SKU 或名称" placeholder="搜索 SKU 或零件名称" value={query} onChange={(e) => setQuery(e.target.value)} />
@@ -36,7 +45,11 @@ function SkuPicker({ line, items, onChange }: { line: DraftLine; items: ImportIn
       <option value="">新建 SKU（保存草稿时创建）</option>
       {matches.map((item) => <option key={item.id} value={item.id}>{item.sku} · {item.name}</option>)}
     </select>
-    {line.inventory_item_id ? <p className="text-xs text-primary">{line.match || "已选择已有库存零件"}，请核对型号。已有库存名称不会自动覆盖。</p> : <>
+    {line.inventory_item_id ? <div className="space-y-1 text-xs leading-relaxed">
+      <p className="text-primary">{line.match || "已选择已有库存零件"}，请核对型号。</p>
+      {selected && <p className="break-words text-muted-foreground">{saved ? "当前库存名称" : "保存后库存名称"}：<span className="text-foreground">{saved ? selected.name : enriched!.name}</span></p>}
+      {!saved && <p className="text-muted-foreground">{nameHint}</p>}
+    </div> : <>
       <div className="grid grid-cols-[minmax(0,1fr)_100px] gap-2">
         <label className="space-y-1 text-xs text-muted-foreground"><span>SKU（默认使用零件编号）</span><Input aria-label="新 SKU 编号" placeholder="默认使用完整零件编号" maxLength={50} value={line.new_sku} onChange={(e) => onChange({ new_sku: e.target.value })} /></label>
         <label className="space-y-1 text-xs text-muted-foreground"><span>库存单位</span><Input aria-label="库存单位" placeholder="单位" value={line.unit} onChange={(e) => onChange({ unit: e.target.value })} /></label>
@@ -133,7 +146,11 @@ export default function PurchaseImportPage() {
     setBusy("保存已核对的采购草稿…"); setError("");
     try {
       const result = await api<{ order: { id: string; purchase_number: string } }>(`/api/purchases/imports/${source.id}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...parsed.data, confirmed: true }) });
-      setSaved(result.order); window.scrollTo({ top: 0, behavior: "smooth" });
+      setSaved(result.order);
+      // Refresh actual catalog names: another reviewer may have maintained a name meanwhile.
+      const refreshed = await api<{ items: ImportInventoryItem[] }>(`/api/purchases/imports/${source.id}`).catch(() => null);
+      if (refreshed) setItems(refreshed.items);
+      window.scrollTo({ top: 0, behavior: "smooth" });
     } catch (e) { setError(e instanceof Error ? e.message : "保存失败"); }
     finally { setBusy(""); }
   }
@@ -176,9 +193,9 @@ export default function PurchaseImportPage() {
                 <label className="space-y-1 text-xs text-muted-foreground"><span>零件 / 费用名称原文 *</span><Input value={line.description} onChange={(e) => patchLine(index, { description: e.target.value, description_zh: "" })} /></label>
                 <label className="space-y-1 text-xs text-muted-foreground sm:col-span-2"><span>中文译名（自动翻译，可修改）</span><Input placeholder="识别时自动翻译；历史记录或不确定的译名可手动补充" maxLength={200} value={line.description_zh ?? ""} onChange={(e) => patchLine(index, { description_zh: e.target.value })} /></label>
               </div>
-              <p className="break-words text-xs leading-relaxed text-muted-foreground">{line.kind === "PART" ? "保存名称" : "名称预览"}：<span className="text-foreground">{purchaseItemName(line.description, line.description_zh) || "待填写"}</span>。中文仅供辅助核对；修改原文后需重新填写对应译名。</p>
+              <p className="break-words text-xs leading-relaxed text-muted-foreground">{line.inventory_item_id ? "采购明细名称" : line.kind === "PART" ? "保存名称" : "名称预览"}：<span className="text-foreground">{purchaseItemName(line.description, line.description_zh) || "待填写"}</span>。中文仅供辅助核对；修改原文后需重新填写对应译名。</p>
               <div className="grid grid-cols-3 gap-2">{([['qty', '数量（核对实收）'], ['unit_price', '实际单价 $'], ['line_amount', '行金额 $']] as const).map(([key, label]) => <label key={key} className="space-y-1 text-xs text-muted-foreground"><span>{label}</span><Input inputMode={key === "qty" ? "numeric" : "decimal"} value={line[key]} onChange={(e) => patchLine(index, { [key]: e.target.value })} /></label>)}</div>
-              {line.kind === "PART" && Number(line.qty) > 0 ? <SkuPicker line={line} items={items} onChange={(value) => patchLine(index, value)} /> : <p className="rounded-lg bg-muted/40 p-2 text-xs text-muted-foreground">此行不增加库存数量。</p>}
+              {line.kind === "PART" && Number(line.qty) > 0 ? <SkuPicker line={line} items={items} saved={Boolean(saved)} onChange={(value) => patchLine(index, value)} /> : <p className="rounded-lg bg-muted/40 p-2 text-xs text-muted-foreground">此行不增加库存数量。</p>}
             </article>)}
             <Button variant="outline" className="w-full" onClick={() => patch({ lines: [...draft.lines, { item_number: "", description: "", description_zh: "", qty: "1", unit_price: "", line_amount: "", kind: "PART", inventory_item_id: null, new_sku: "", unit: "个" }] })}><Plus className="mr-2 size-4" />补充漏识别行</Button>
           </section>
@@ -186,7 +203,7 @@ export default function PurchaseImportPage() {
         </fieldset>
         {!saved && <section className="surface-panel space-y-3 p-4 sm:p-5">
           {issues.length ? <div role="status" className="space-y-1 text-sm text-amber-700 dark:text-amber-300">{issues.slice(0, 8).map((issue, i) => <p key={i}>{issue}</p>)}</div> : <p className="flex items-center gap-2 text-sm text-primary"><CheckCircle2 className="size-4" />金额核对通过</p>}
-          <label className="flex cursor-pointer items-start gap-3 text-sm leading-relaxed"><input className="mt-1 size-4 shrink-0 accent-primary" type="checkbox" checked={draft.confirmed} disabled={Boolean(busy) || !options?.canWrite} onChange={(e) => setDraft({ ...draft, confirmed: e.target.checked })} /><span>我已对照单据核对 SKU、数量、实收、价格和费用分类；确认新增的 SKU 无重复。</span></label>
+          <label className="flex cursor-pointer items-start gap-3 text-sm leading-relaxed"><input className="mt-1 size-4 shrink-0 accent-primary" type="checkbox" checked={draft.confirmed} disabled={Boolean(busy) || !options?.canWrite} onChange={(e) => setDraft({ ...draft, confirmed: e.target.checked })} /><span>我已对照单据核对 SKU、中文译名、保存后库存名称、数量、实收、价格和费用分类；确认新增的 SKU 无重复。</span></label>
           <Button className="min-h-12 w-full" disabled={Boolean(busy) || !draft.confirmed || Boolean(issues.length) || !options?.canWrite} onClick={save}>保存采购草稿（不增加库存）</Button>
         </section>}
       </div>

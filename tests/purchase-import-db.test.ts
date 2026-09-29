@@ -54,6 +54,33 @@ test("AI purchase review is atomic, idempotent, account-scoped and never directl
       const reusedOrder = await saveReviewedPurchase(tx, second.id, owner, actor, reuse);
       assert.equal((await tx.inventoryItem.findUniqueOrThrow({ where: { id: existing.id } })).name, "Existing catalog name");
       assert.equal((await tx.purchaseOrderLine.findFirstOrThrow({ where: { purchase_order_id: reusedOrder.id } })).name_snapshot, "Sensor / 传感器");
+
+      const untranslated = await tx.inventoryItem.create({ data: {
+        clerk_user_id: owner, sku: "A3", name: "SENSOR", unit: "件", on_hand_qty: 7,
+        reserved_qty: 2, avg_cost_cents: 1234, default_sale_price_cents: 1800, category: "Sensors",
+      } });
+      const third = await tx.purchaseImport.create({ data: { clerk_user_id: owner, file_hash: "third-file", file_name: "test3.jpg", image_data_url: "test-only", model: "test", created_by: owner, status: "READY" } });
+      const repeatedLine = { ...review.lines[0], inventory_item_id: untranslated.id, qty: 1, line_amount: "10.00" };
+      const appendReview = { ...review, invoice_number: "third-invoice", lines: [repeatedLine, repeatedLine, review.lines[1]] };
+      const appendedOrder = await saveReviewedPurchase(tx, third.id, owner, actor, appendReview);
+      const enriched = await tx.inventoryItem.findUniqueOrThrow({ where: { id: untranslated.id } });
+      assert.equal(enriched.name, "SENSOR / 传感器");
+      assert.deepEqual({ ...enriched, name: untranslated.name, updated_at: untranslated.updated_at }, untranslated);
+      const audits = await tx.auditLog.findMany({ where: { actor_user_id: owner, entity_id: untranslated.id, action: "INVENTORY_UPDATED" } });
+      assert.equal(audits.length, 1); // repeated lines do not append or audit twice
+      assert.deepEqual(audits[0].details, {
+        source: "AI_REVIEWED_TRANSLATION", purchase_import_id: third.id, sku: "A3", changed_fields: ["name"],
+        before_name: "SENSOR", after_name: "SENSOR / 传感器",
+      });
+      assert.equal((await saveReviewedPurchase(tx, third.id, owner, actor, appendReview)).id, appendedOrder.id);
+      assert.equal(await tx.auditLog.count({ where: { entity_id: untranslated.id, action: "INVENTORY_UPDATED" } }), 1);
+
+      const fourth = await tx.purchaseImport.create({ data: { clerk_user_id: owner, file_hash: "fourth-file", file_name: "test4.jpg", image_data_url: "test-only", model: "test", created_by: owner, status: "READY" } });
+      await saveReviewedPurchase(tx, fourth.id, owner, actor, {
+        ...review, invoice_number: "fourth-invoice", lines: [{ ...review.lines[0], inventory_item_id: untranslated.id, description_zh: "另一个译名" }, review.lines[1]],
+      });
+      assert.equal((await tx.inventoryItem.findUniqueOrThrow({ where: { id: untranslated.id } })).name, "SENSOR / 传感器");
+      assert.equal(await tx.auditLog.count({ where: { entity_id: untranslated.id, action: "INVENTORY_UPDATED" } }), 1);
       assert.equal(await tx.stockMovement.count({ where: { clerk_user_id: owner } }), 0);
       throw rollback;
     }, { timeout: 60000 }), (error) => error === rollback);

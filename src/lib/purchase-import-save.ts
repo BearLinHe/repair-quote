@@ -1,6 +1,6 @@
 import type { Prisma } from "@prisma/client";
 import { auditData, type AuditActor } from "./audit";
-import { importKey, moneyCents, purchaseItemName, reviewedInvoiceSchema, validateReviewedInvoice, type ReviewedInvoice } from "./purchase-import";
+import { existingPurchaseItemName, importKey, moneyCents, purchaseItemName, reviewedInvoiceSchema, validateReviewedInvoice, type ReviewedInvoice } from "./purchase-import";
 import { generatePurchaseNumber } from "./purchase-number";
 
 export class PurchaseImportError extends Error {}
@@ -30,6 +30,19 @@ export async function saveReviewedPurchase(tx: Prisma.TransactionClient, id: str
     if (line.inventory_item_id) {
       item = await tx.inventoryItem.findFirst({ where: { id: line.inventory_item_id, clerk_user_id: owner, is_active: true } });
       if (!item) throw new PurchaseImportError("选择的库存零件已停用或不属于当前账号，请重新选择");
+      const enriched = existingPurchaseItemName(item.name, line.description, line.description_zh);
+      if (enriched.reason === "append") {
+        const updated = await tx.inventoryItem.updateMany({
+          where: { id: item.id, clerk_user_id: owner, is_active: true, name: item.name },
+          data: { name: enriched.name },
+        });
+        if (updated.count !== 1) throw new PurchaseImportError("库存名称已变更，请刷新后重新核对");
+        await tx.auditLog.create({ data: auditData(actor, {
+          action: "INVENTORY_UPDATED", entityType: "INVENTORY_ITEM", entityId: item.id, entityLabel: enriched.name,
+          details: { source: "AI_REVIEWED_TRANSLATION", purchase_import_id: id, sku: item.sku, changed_fields: ["name"], before_name: item.name, after_name: enriched.name },
+        }) });
+        item = { ...item, name: enriched.name };
+      }
     } else {
       item = await tx.inventoryItem.findFirst({ where: { clerk_user_id: owner, sku: { equals: line.new_sku, mode: "insensitive" } } });
       if (item) {
@@ -43,7 +56,7 @@ export async function saveReviewedPurchase(tx: Prisma.TransactionClient, id: str
       }
     }
     const unitCost = moneyCents(line.unit_price)!;
-    // The invoice's reviewed bilingual name is a snapshot, not a rename of an existing SKU.
+    // Keep the reviewed invoice wording even when a curated catalog name is preserved.
     stockLines.push({ inventory_item_id: item.id, name_snapshot: name, qty: line.qty, unit_cost_cents: unitCost, line_total_cents: line.qty * unitCost });
     if (line.item_number) {
       const partKey = importKey(line.item_number);
