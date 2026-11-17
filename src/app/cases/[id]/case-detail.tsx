@@ -17,6 +17,7 @@ import type { CaseStatus } from "@prisma/client";
 import { canEditCaseDetails } from "@/lib/case-rules";
 import { apiErrorMessage } from "@/lib/api-error";
 import { BillToCombobox } from "@/components/bill-to-combobox";
+import { InventoryPartCombobox } from "@/components/inventory-part-combobox";
 
 type LaborRow = {
   id: string;
@@ -126,6 +127,7 @@ export function CaseDetail({ caseData }: { caseData: CaseData }) {
   const [caseState, setCaseState] = useState(caseData);
   const [history, setHistory] = useState<History | null>(null);
   const [inventory, setInventory] = useState<InventoryOption[]>([]);
+  const [inventoryLoading, setInventoryLoading] = useState(true);
   const [selectedInventoryId, setSelectedInventoryId] = useState(initialDraft.selected_inventory_id ?? "");
   const [newItemName, setNewItemName] = useState(initialDraft.repair_item_name ?? "");
   const [newPartPrice, setNewPartPrice] = useState(initialDraft.part_price ?? "");
@@ -221,7 +223,8 @@ export function CaseDetail({ caseData }: { caseData: CaseData }) {
   useEffect(() => {
     requestJson<{ items: InventoryOption[] }>("/api/inventory")
       .then((data) => setInventory(data.items.filter((item) => item.is_active)))
-      .catch((error) => setActionError(error instanceof Error ? error.message : "库存加载失败"));
+      .catch((error) => setActionError(error instanceof Error ? error.message : "库存加载失败"))
+      .finally(() => setInventoryLoading(false));
   }, []);
 
   const addRepairItem = async (name: string) => {
@@ -700,10 +703,14 @@ export function CaseDetail({ caseData }: { caseData: CaseData }) {
           {canEditDetails && (
           <div className="grid gap-3 rounded-xl border border-border/70 bg-card/50 p-4 sm:grid-cols-[minmax(260px,1.7fr)_minmax(190px,1fr)_120px_auto] sm:items-start">
             <div className="grid min-w-0 gap-1">
-              <label className="text-sm font-medium text-muted-foreground">从库存选择</label>
-              <Select
+              <label htmlFor="case-inventory-part" className="text-sm font-medium text-muted-foreground">从库存选择</label>
+              <InventoryPartCombobox
+                id="case-inventory-part"
+                items={inventory}
                 value={selectedInventoryId}
-                onValueChange={(value) => {
+                disabled={loading}
+                loading={inventoryLoading}
+                onChange={(value) => {
                   setSelectedInventoryId(value);
                   const item = inventory.find((option) => option.id === value);
                   if (item) {
@@ -711,18 +718,7 @@ export function CaseDetail({ caseData }: { caseData: CaseData }) {
                     setNewPartQty("1");
                   }
                 }}
-              >
-                <SelectTrigger className="min-h-[44px] w-full sm:min-h-[40px]">
-                  <SelectValue placeholder="选择库存配件" />
-                </SelectTrigger>
-                <SelectContent>
-                  {inventory.map((item) => (
-                    <SelectItem key={item.id} value={item.id} disabled={item.available_qty <= 0}>
-                      <span className="flex items-center gap-2">{item.image_data_url ? <img src={item.image_data_url} alt="" className="size-7 rounded-md object-cover" /> : <span className="size-7 rounded-md bg-muted" />}<span>{item.sku} · {item.name}（可用 {item.available_qty} {item.unit}）</span></span>
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              />
               <p className="min-h-5 text-xs text-muted-foreground">
                 {selectedInventoryId
                   ? `当前可用 ${inventory.find((item) => item.id === selectedInventoryId)?.available_qty ?? 0} ${inventory.find((item) => item.id === selectedInventoryId)?.unit ?? "个"}`
